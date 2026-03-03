@@ -2,6 +2,8 @@
 -- Per-weapon rate-of-fire overrides via WeaponCatalog
 
 local DEFAULTS_PATH = "ROFDefaults.json"
+local PROFILES_DIR = "ROFProfiles/"
+local PROFILES_INDEX = "ROFProfiles_index.json"
 local rof_edits = {}
 local rof_defaults = {}
 local has_applied = false
@@ -49,6 +51,102 @@ for i, key in ipairs(WEAPON_KEYS) do
     local label = WEAPON_NAMES[key] or key
     dropdown_items[i] = key
     dropdown_options[i] = label
+end
+
+local profile_state = {
+    name_buf = "",
+    names = {},
+    selected = 1,
+}
+
+local function sanitize_filename(name)
+    return name:gsub("[^%w%-%_ ]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function load_profile_index()
+    local ok, data = pcall(json.load_file, PROFILES_INDEX)
+    if ok and data and type(data) == "table" then
+        if data.names and type(data.names) == "table" then
+            table.sort(data.names)
+            profile_state.names = data.names
+            if data.active and type(data.active) == "string" then
+                for i, n in ipairs(profile_state.names) do
+                    if n == data.active then profile_state.selected = i; break end
+                end
+            end
+        elseif #data > 0 then
+            table.sort(data)
+            profile_state.names = data
+        else
+            profile_state.names = {}
+        end
+    else
+        profile_state.names = {}
+    end
+    if profile_state.selected > #profile_state.names then
+        profile_state.selected = math.max(1, #profile_state.names)
+    end
+end
+
+local function save_profile_index()
+    local active_name = profile_state.names[profile_state.selected]
+    pcall(json.dump_file, PROFILES_INDEX, { names = profile_state.names, active = active_name })
+end
+
+local function save_profile(name)
+    local data = {
+        enable_aim_camera_shake = ui_state.enable_aim_camera_shake,
+        edits = rof_edits,
+    }
+    pcall(json.dump_file, PROFILES_DIR .. name .. ".json", data)
+    local found = false
+    for _, n in ipairs(profile_state.names) do
+        if n == name then found = true; break end
+    end
+    if not found then
+        profile_state.names[#profile_state.names + 1] = name
+        table.sort(profile_state.names)
+    end
+    save_profile_index()
+end
+
+local function load_profile(name)
+    local ok, data = pcall(json.load_file, PROFILES_DIR .. name .. ".json")
+    if ok and data then
+        rof_edits = data.edits or {}
+        if data.enable_aim_camera_shake ~= nil then
+            ui_state.enable_aim_camera_shake = data.enable_aim_camera_shake
+        end
+        local key = dropdown_items[selected_index]
+        if key and rof_edits[key] then
+            local edit = rof_edits[key]
+            ui_state.type_of_shoot = edit.TypeOfShoot or 0
+            ui_state.shot_interval = edit.ShotInterval or 0.6
+            ui_state.burst_shot_interval = edit.BurstShotInterval or 5.0
+            ui_state.burst_num = edit.BurstNum or 3
+        end
+        return true
+    end
+    return false
+end
+
+local function delete_profile(name)
+    pcall(json.dump_file, PROFILES_DIR .. name .. ".json", {})
+    for i, n in ipairs(profile_state.names) do
+        if n == name then
+            table.remove(profile_state.names, i)
+            break
+        end
+    end
+    save_profile_index()
+    if profile_state.selected > #profile_state.names then
+        profile_state.selected = math.max(1, #profile_state.names)
+    end
+end
+
+load_profile_index()
+if #profile_state.names > 0 and profile_state.names[profile_state.selected] then
+    load_profile(profile_state.names[profile_state.selected])
 end
 
 local function try_call(obj, method)
@@ -224,6 +322,33 @@ local function apply_edits()
     return total
 end
 
+local function read_live_values(weapon_key)
+    local catalogs = find_all_catalogs(get_scene())
+    for _, catalog in ipairs(catalogs) do
+        local dt = get_data_table(get_register(catalog))
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                local wd; pcall(function() wd = dt:call("get_Item", i) end)
+                if wd then
+                    local id = get_entry_id(wd)
+                    if id == weapon_key then
+                        local sd = resolve_shoot_data(wd)
+                        if sd then
+                            return {
+                                TypeOfShoot = tonumber(try_field(sd, "TypeOfShoot")) or 0,
+                                ShotInterval = tonumber(try_field(sd, "ShotInterval")) or 0.6,
+                                BurstShotInterval = tonumber(try_field(sd, "BurstShotInterval")) or 5.0,
+                                BurstNum = tonumber(try_field(sd, "BurstNum")) or 3,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function capture_defaults()
     local defaults = {}
     local catalogs = find_all_catalogs(get_scene())
@@ -308,6 +433,50 @@ re.on_draw_ui(function()
     if imgui.tree_node("ROF Editor") then
         local changed
 
+        if #profile_state.names > 0 then
+            local prof_changed
+            prof_changed, profile_state.selected = imgui.combo("Profile", profile_state.selected, profile_state.names)
+            if profile_state.selected < 1 then profile_state.selected = 1 end
+            if profile_state.selected > #profile_state.names then profile_state.selected = #profile_state.names end
+            if prof_changed then
+                local pname = profile_state.names[profile_state.selected]
+                if pname and load_profile(pname) then
+                    apply_all_now()
+                    save_profile_index()
+                    ui_state.status = "Loaded profile: " .. pname
+                end
+            end
+        else
+            imgui.text("No saved profiles")
+        end
+
+        local buf_changed
+        buf_changed, profile_state.name_buf = imgui.input_text("##profile_name", profile_state.name_buf)
+        imgui.same_line()
+        if imgui.button("Save") then
+            local safe = sanitize_filename(profile_state.name_buf)
+            if safe ~= "" then
+                save_profile(safe)
+                for i, n in ipairs(profile_state.names) do
+                    if n == safe then profile_state.selected = i; break end
+                end
+                ui_state.status = "Profile saved: " .. safe
+            else
+                ui_state.status = "Enter a profile name"
+            end
+        end
+        imgui.same_line()
+        if imgui.button("Delete") then
+            if #profile_state.names > 0 then
+                local pname = profile_state.names[profile_state.selected]
+                if pname then
+                    delete_profile(pname)
+                    ui_state.status = "Deleted profile: " .. pname
+                end
+            end
+        end
+        imgui.separator()
+
         local acs_changed = false
         acs_changed, ui_state.enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake (Global)", ui_state.enable_aim_camera_shake)
         if acs_changed then
@@ -321,12 +490,12 @@ re.on_draw_ui(function()
         if selected_index > #dropdown_items then selected_index = #dropdown_items end
         if changed then
             local key = dropdown_items[selected_index]
-            local edit = rof_edits[key]
-            if edit then
-                ui_state.type_of_shoot = edit.TypeOfShoot or 0
-                ui_state.shot_interval = edit.ShotInterval or 0.6
-                ui_state.burst_shot_interval = edit.BurstShotInterval or 5.0
-                ui_state.burst_num = edit.BurstNum or 3
+            local vals = rof_edits[key] or read_live_values(key)
+            if vals then
+                ui_state.type_of_shoot = vals.TypeOfShoot or 0
+                ui_state.shot_interval = vals.ShotInterval or 0.6
+                ui_state.burst_shot_interval = vals.BurstShotInterval or 5.0
+                ui_state.burst_num = vals.BurstNum or 3
             end
         end
 
