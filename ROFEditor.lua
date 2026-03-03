@@ -39,6 +39,7 @@ local ui_state = {
     shot_interval = 0.6,
     burst_shot_interval = 5.0,
     burst_num = 3,
+    enable_aim_camera_shake = true,
     status = ""
 }
 
@@ -187,6 +188,15 @@ local function apply_edits_to_table(dt)
     for i = 0, count - 1 do
         local wd; pcall(function() wd = dt:call("get_Item", i) end)
         if wd then
+            local wp = try_field(wd, "WeaponParameter") or try_field(wd, "_WeaponParameter")
+            if wp then
+                local acsp = try_field(wp, "_AimCameraShakeParam") or try_field(wp, "AimCameraShakeParam")
+                if acsp then
+                    set_field_safe(acsp, "_EnableAimCameraShake", ui_state.enable_aim_camera_shake)
+                    applied = applied + 1
+                end
+            end
+
             local id = get_entry_id(wd)
             local edit = id and rof_edits[id]
             if edit then
@@ -226,6 +236,16 @@ local function capture_defaults()
                 if wd then
                     local id = get_entry_id(wd)
                     if id and not defaults[id] then
+                        local acs_default = true
+                        local wp = try_field(wd, "WeaponParameter") or try_field(wd, "_WeaponParameter")
+                        if wp then
+                            local acsp = try_field(wp, "_AimCameraShakeParam") or try_field(wp, "AimCameraShakeParam")
+                            if acsp then
+                                local val = try_field(acsp, "_EnableAimCameraShake")
+                                if val ~= nil then acs_default = val end
+                            end
+                        end
+
                         local sd = resolve_shoot_data(wd)
                         if sd then
                             local tos = try_field(sd, "TypeOfShoot")
@@ -236,7 +256,8 @@ local function capture_defaults()
                                 TypeOfShoot = tonumber(tos) or 0,
                                 ShotInterval = tonumber(si) or 0.6,
                                 BurstShotInterval = tonumber(bsi) or 5.0,
-                                BurstNum = tonumber(bn) or 3
+                                BurstNum = tonumber(bn) or 3,
+                                EnableAimCameraShake = acs_default
                             }
                         end
                     end
@@ -286,6 +307,14 @@ end
 re.on_draw_ui(function()
     if imgui.tree_node("ROF Editor") then
         local changed
+
+        local acs_changed = false
+        acs_changed, ui_state.enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake (Global)", ui_state.enable_aim_camera_shake)
+        if acs_changed then
+            apply_all_now()
+            ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
+        end
+        imgui.separator()
 
         changed, selected_index = imgui.combo("Weapon", selected_index, dropdown_options)
         if selected_index < 1 then selected_index = 1 end
@@ -375,6 +404,10 @@ re.on_draw_ui(function()
                     BurstShotInterval = def.BurstShotInterval,
                     BurstNum = def.BurstNum
                 }
+                -- We use the first one found or just assume true for global
+                if def.EnableAimCameraShake ~= nil then
+                    ui_state.enable_aim_camera_shake = def.EnableAimCameraShake
+                end
                 count = count + 1
             end
             apply_all_now()
