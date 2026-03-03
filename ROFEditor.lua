@@ -57,6 +57,7 @@ local profile_state = {
     name_buf = "",
     names = {},
     selected = 1,
+    naming = false,
 }
 
 local function sanitize_filename(name)
@@ -446,34 +447,52 @@ re.on_draw_ui(function()
                     ui_state.status = "Loaded profile: " .. pname
                 end
             end
-        else
-            imgui.text("No saved profiles")
-        end
-
-        local buf_changed
-        buf_changed, profile_state.name_buf = imgui.input_text("##profile_name", profile_state.name_buf)
-        imgui.same_line()
-        if imgui.button("Save") then
-            local safe = sanitize_filename(profile_state.name_buf)
-            if safe ~= "" then
-                save_profile(safe)
-                for i, n in ipairs(profile_state.names) do
-                    if n == safe then profile_state.selected = i; break end
+            if imgui.button("Save") then
+                local pname = profile_state.names[profile_state.selected]
+                if pname then
+                    save_profile(pname)
+                    ui_state.status = "Profile saved: " .. pname
                 end
-                ui_state.status = "Profile saved: " .. safe
-            else
-                ui_state.status = "Enter a profile name"
             end
-        end
-        imgui.same_line()
-        if imgui.button("Delete") then
-            if #profile_state.names > 0 then
+            imgui.same_line()
+            if imgui.button("Delete") then
                 local pname = profile_state.names[profile_state.selected]
                 if pname then
                     delete_profile(pname)
                     ui_state.status = "Deleted profile: " .. pname
                 end
             end
+            imgui.same_line()
+        end
+        if imgui.button("New Profile") then
+            profile_state.naming = not profile_state.naming
+        end
+        if profile_state.naming then
+            local buf_changed
+            buf_changed, profile_state.name_buf = imgui.input_text("Name", profile_state.name_buf)
+            imgui.same_line()
+            if imgui.button("Create") then
+                local safe = sanitize_filename(profile_state.name_buf)
+                if safe ~= "" then
+                    save_profile(safe)
+                    for i, n in ipairs(profile_state.names) do
+                        if n == safe then profile_state.selected = i; break end
+                    end
+                    save_profile_index()
+                    profile_state.name_buf = ""
+                    profile_state.naming = false
+                    ui_state.status = "Profile saved: " .. safe
+                else
+                    ui_state.status = "Enter a profile name"
+                end
+            end
+            if ui_state.status:match("^Enter a profile name") then
+                imgui.same_line()
+                imgui.text_colored(ui_state.status, 0xFF00FFFF)
+            end
+        end
+        if ui_state.status:match("^Profile saved:") or ui_state.status:match("^Deleted profile:") then
+            imgui.text_colored(ui_state.status, ui_state.status:match("^Deleted") and 0xFF5555FF or 0xFF00FF00)
         end
         imgui.separator()
 
@@ -523,16 +542,7 @@ re.on_draw_ui(function()
                     BurstNum = math.floor(ui_state.burst_num + 0.5)
                 }
                 apply_all_now()
-                ui_state.status = "Saved " .. key
-            end
-        end
-
-        if imgui.button("Remove Entry") then
-            local key = dropdown_items[selected_index]
-            if key and rof_edits[key] then
-                rof_edits[key] = nil
-                apply_all_now()
-                ui_state.status = "Removed " .. key
+                ui_state.status = "Saved settings for " .. (WEAPON_NAMES[key] or key)
             end
         end
 
@@ -558,9 +568,9 @@ re.on_draw_ui(function()
                 ui_state.burst_shot_interval = def.BurstShotInterval
                 ui_state.burst_num = def.BurstNum
                 apply_all_now()
-                ui_state.status = "Reset " .. key .. " to defaults"
+                ui_state.status = "Reset " .. (WEAPON_NAMES[key] or key) .. " to defaults"
             elseif key then
-                ui_state.status = "No defaults saved for " .. key .. " (capture first)"
+                ui_state.status = "No defaults saved for " .. (WEAPON_NAMES[key] or key) .. " (capture first)"
             end
         end
         imgui.same_line()
@@ -591,8 +601,17 @@ re.on_draw_ui(function()
             ui_state.status = "Reset all " .. tostring(count) .. " weapons to defaults"
         end
 
-        if ui_state.status ~= "" then
-            imgui.text(ui_state.status)
+        local profile_msg = ui_state.status:match("^Enter a profile name")
+            or ui_state.status:match("^Profile saved:")
+            or ui_state.status:match("^Deleted profile:")
+        if ui_state.status ~= "" and not profile_msg then
+            local color = 0xFFFFFFFF
+            if ui_state.status:match("^Saved settings for") then
+                color = 0xFF00FF00
+            elseif ui_state.status:match("^No defaults saved") then
+                color = 0xFF00FFFF
+            end
+            imgui.text_colored(ui_state.status, color)
         end
 
         local has_entries = false
