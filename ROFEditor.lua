@@ -1,7 +1,9 @@
 -- ROF Editor for RE9
 -- Per-weapon rate-of-fire overrides via WeaponCatalog
 
+local DEFAULTS_PATH = "ROFDefaults.json"
 local rof_edits = {}
+local rof_defaults = {}
 local has_applied = false
 
 local WEAPON_NAMES = {
@@ -24,7 +26,7 @@ local WEAPON_NAMES = {
 }
 
 local WEAPON_KEYS = {
-    "arm0000", "arm0001", "arm0002", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007", 
+    "arm0000", "arm0001", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007", 
     "arm0100", "arm0103", "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601"
 }
 
@@ -71,7 +73,7 @@ local function find_all_catalogs(scene)
     local results = {}
     if not scene then return results end
     local seen = {}
-    for _, name in ipairs({ "WeaponCatalog", "WeaponCatalog_AO", "WeaponCatalog_MC", "WeaponCatalog_MC_2nd" }) do
+    for _, name in ipairs({ "WeaponCatalog" }) do
         local obj = scene:call("findGameObject(System.String)", name)
         if obj then
             local addr = obj:get_address()
@@ -212,6 +214,48 @@ local function apply_edits()
     return total
 end
 
+local function capture_defaults()
+    local defaults = {}
+    local catalogs = find_all_catalogs(get_scene())
+    for _, catalog in ipairs(catalogs) do
+        local dt = get_data_table(get_register(catalog))
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                local wd; pcall(function() wd = dt:call("get_Item", i) end)
+                if wd then
+                    local id = get_entry_id(wd)
+                    if id and not defaults[id] then
+                        local sd = resolve_shoot_data(wd)
+                        if sd then
+                            local tos = try_field(sd, "TypeOfShoot")
+                            local si = try_field(sd, "ShotInterval")
+                            local bsi = try_field(sd, "BurstShotInterval")
+                            local bn = try_field(sd, "BurstNum")
+                            defaults[id] = {
+                                TypeOfShoot = tonumber(tos) or 0,
+                                ShotInterval = tonumber(si) or 0.6,
+                                BurstShotInterval = tonumber(bsi) or 5.0,
+                                BurstNum = tonumber(bn) or 3
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+    rof_defaults = defaults
+    pcall(json.dump_file, DEFAULTS_PATH, defaults)
+    return defaults
+end
+
+local function load_defaults()
+    local ok, data = pcall(json.load_file, DEFAULTS_PATH)
+    if ok and data then rof_defaults = data end
+end
+
+load_defaults()
+
 local function apply_all_now()
     has_applied = false
     local count = apply_edits()
@@ -292,6 +336,57 @@ re.on_draw_ui(function()
                 apply_all_now()
                 ui_state.status = "Removed " .. key
             end
+        end
+
+        imgui.separator()
+        if imgui.button("Capture Defaults") then
+            local defaults = capture_defaults()
+            local n = 0; for _ in pairs(defaults) do n = n + 1 end
+            ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
+        end
+        imgui.same_line()
+        if imgui.button("Reset to Defaults") then
+            local key = dropdown_items[selected_index]
+            if key and rof_defaults[key] then
+                local def = rof_defaults[key]
+                rof_edits[key] = {
+                    TypeOfShoot = def.TypeOfShoot,
+                    ShotInterval = def.ShotInterval,
+                    BurstShotInterval = def.BurstShotInterval,
+                    BurstNum = def.BurstNum
+                }
+                ui_state.type_of_shoot = def.TypeOfShoot
+                ui_state.shot_interval = def.ShotInterval
+                ui_state.burst_shot_interval = def.BurstShotInterval
+                ui_state.burst_num = def.BurstNum
+                apply_all_now()
+                ui_state.status = "Reset " .. key .. " to defaults"
+            elseif key then
+                ui_state.status = "No defaults saved for " .. key .. " (capture first)"
+            end
+        end
+        imgui.same_line()
+        if imgui.button("Reset All to Defaults") then
+            local count = 0
+            for key, def in pairs(rof_defaults) do
+                rof_edits[key] = {
+                    TypeOfShoot = def.TypeOfShoot,
+                    ShotInterval = def.ShotInterval,
+                    BurstShotInterval = def.BurstShotInterval,
+                    BurstNum = def.BurstNum
+                }
+                count = count + 1
+            end
+            apply_all_now()
+            local key = dropdown_items[selected_index]
+            if key and rof_defaults[key] then
+                local def = rof_defaults[key]
+                ui_state.type_of_shoot = def.TypeOfShoot
+                ui_state.shot_interval = def.ShotInterval
+                ui_state.burst_shot_interval = def.BurstShotInterval
+                ui_state.burst_num = def.BurstNum
+            end
+            ui_state.status = "Reset all " .. tostring(count) .. " weapons to defaults"
         end
 
         if ui_state.status ~= "" then
