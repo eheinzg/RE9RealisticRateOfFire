@@ -24,12 +24,8 @@ local WEAPON_NAMES = {
 }
 
 local WEAPON_KEYS = {
-    "arm0000", "arm0001", "arm0002", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007", "arm0008",
-    "arm0100", "arm0103", "arm0104",
-    "arm0200", "arm0202", "arm0203", "arm0204", "arm0205", "arm0206", "arm0207",
-    "arm0300", "arm0303", "arm0304", "arm0305", "arm0307", "arm0309", "arm0315", "arm0318",
-    "arm0319", "arm0320", "arm0321", "arm0322", "arm0323", "arm0324", "arm0325", "arm0326",
-    "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601"
+    "arm0000", "arm0001", "arm0002", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007", 
+    "arm0100", "arm0103", "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601"
 }
 
 local dropdown_options = {}
@@ -71,12 +67,42 @@ local function get_scene()
     return sm_type and sdk.call_native_func(sm, sm_type, "get_CurrentScene")
 end
 
-local function find_catalog(scene)
-    if not scene then return nil end
+local function find_all_catalogs(scene)
+    local results = {}
+    if not scene then return results end
+    local seen = {}
     for _, name in ipairs({ "WeaponCatalog", "WeaponCatalog_AO", "WeaponCatalog_MC", "WeaponCatalog_MC_2nd" }) do
         local obj = scene:call("findGameObject(System.String)", name)
-        if obj then return obj end
+        if obj then
+            local addr = obj:get_address()
+            if not seen[addr] then
+                seen[addr] = true
+                results[#results + 1] = obj
+            end
+        end
     end
+    local reg_type = sdk.typeof("app.WeaponCatalogRegister")
+    if reg_type then
+        local all_components = nil
+        pcall(function() all_components = scene:call("findComponents(System.Type)", reg_type) end)
+        if all_components then
+            local n = 0; pcall(function() n = all_components:call("get_Count") end)
+            for i = 0, n - 1 do
+                local comp; pcall(function() comp = all_components:call("get_Item", i) end)
+                if comp then
+                    local go; pcall(function() go = comp:call("get_GameObject") end)
+                    if go then
+                        local addr = go:get_address()
+                        if not seen[addr] then
+                            seen[addr] = true
+                            results[#results + 1] = go
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return results
 end
 
 local function get_register(catalog)
@@ -152,8 +178,7 @@ local function resolve_shoot_data(weapon_data)
     end
 end
 
-local function apply_edits()
-    local dt = get_data_table(get_register(find_catalog(get_scene())))
+local function apply_edits_to_table(dt)
     if not dt then return 0 end
     local applied = 0
     local count = 0; pcall(function() count = dt:call("get_Count") end)
@@ -175,6 +200,16 @@ local function apply_edits()
         end
     end
     return applied
+end
+
+local function apply_edits()
+    local catalogs = find_all_catalogs(get_scene())
+    local total = 0
+    for _, catalog in ipairs(catalogs) do
+        local dt = get_data_table(get_register(catalog))
+        total = total + apply_edits_to_table(dt)
+    end
+    return total
 end
 
 local function apply_all_now()
