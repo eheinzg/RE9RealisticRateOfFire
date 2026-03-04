@@ -37,6 +37,7 @@ local WEAPON_KEYS = {
 local dropdown_options = {}
 local dropdown_items = {}
 local selected_index = 1
+local last_equipped_id = nil
 
 local ui_state = {
     type_of_shoot = 0,
@@ -413,6 +414,50 @@ local function get_player()
     return ctx
 end
 
+local function get_player_equipment()
+    local ctx = get_player()
+    if not ctx then return nil end
+    local go = nil
+    pcall(function() go = ctx:call("get_GameObject") end)
+    if not go then return nil end
+    local pe_type = sdk.typeof("app.PlayerEquipment")
+    if not pe_type then return nil end
+    local pe = nil
+    pcall(function() pe = go:call("getComponent(System.Type)", pe_type) end)
+    return pe
+end
+
+local function get_equipped_weapon_id()
+    local pe = get_player_equipment()
+    if not pe then return nil, nil end
+
+    local eid = nil
+    pcall(function() eid = pe:get_field("<EquipWeaponID>k__BackingField") end)
+    if not eid then return nil, pe end
+
+    local eid_str = nil
+    pcall(function() eid_str = eid:call("ToString()") end)
+    if not eid_str then
+        pcall(function() eid_str = tostring(eid:get_field("value__")) end)
+    end
+    return eid_str, pe
+end
+
+local function apply_to_equipped(weapon_key, edit)
+    local eid_str, pe = get_equipped_weapon_id()
+    if not pe or not eid_str then return false end
+    if eid_str ~= weapon_key then return false end
+
+    if edit.ShotInterval then
+        pcall(function() pe:set_field("_ShotInterval", edit.ShotInterval) end)
+        pcall(function() pe:set_field("_CalcShotInterval", edit.ShotInterval) end)
+    end
+    if edit.TypeOfShoot ~= nil then
+        pcall(function() pe:set_field("_EquipShotType", edit.TypeOfShoot) end)
+    end
+    return true
+end
+
 local function get_player_motion()
     local ctx = get_player()
     if not ctx then return nil end
@@ -599,6 +644,36 @@ re.on_draw_ui(function()
         end
         imgui.separator()
 
+        local equipped_key, pe = get_equipped_weapon_id()
+        if pe then
+            if equipped_key then
+                local eid_name = WEAPON_NAMES[equipped_key] or equipped_key
+                imgui.text("Equipped: " .. eid_name .. " (" .. equipped_key .. ")")
+
+                -- Auto-select weapon if it changed
+                if equipped_key ~= last_equipped_id then
+                    for i, key in ipairs(dropdown_items) do
+                        if key == equipped_key then
+                            selected_index = i
+                            local vals = rof_edits[key] or read_live_values(key)
+                            if vals then
+                                ui_state.type_of_shoot = vals.TypeOfShoot or 0
+                                ui_state.shot_interval = vals.ShotInterval or 0.6
+                                ui_state.burst_shot_interval = vals.BurstShotInterval or 5.0
+                                ui_state.burst_num = vals.BurstNum or 3
+                            end
+                            break
+                        end
+                    end
+                    last_equipped_id = equipped_key
+                end
+            else
+                imgui.text("Equipped: (field nil)")
+            end
+        else
+            imgui.text("Equipped: (not detected)")
+        end
+
         changed, selected_index = imgui.combo("Weapon", selected_index, dropdown_options)
         if selected_index < 1 then selected_index = 1 end
         if selected_index > #dropdown_items then selected_index = #dropdown_items end
@@ -630,14 +705,19 @@ re.on_draw_ui(function()
         if any_changed then
             local key = dropdown_items[selected_index]
             if key then
-                rof_edits[key] = {
+                local edit = {
                     TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5),
                     ShotInterval = ui_state.shot_interval,
                     BurstShotInterval = ui_state.burst_shot_interval,
                     BurstNum = math.floor(ui_state.burst_num + 0.5)
                 }
+                rof_edits[key] = edit
                 apply_all_now()
-                ui_state.status = "Saved settings for " .. (WEAPON_NAMES[key] or key)
+                if apply_to_equipped(key, edit) then
+                    ui_state.status = "Applied live: " .. (WEAPON_NAMES[key] or key)
+                else
+                    ui_state.status = "Saved settings for " .. (WEAPON_NAMES[key] or key)
+                end
             end
         end
 
