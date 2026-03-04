@@ -7,6 +7,7 @@ local PROFILES_INDEX = "ROFProfiles_index.json"
 local rof_edits = {}
 local rof_defaults = {}
 local has_applied = false
+local disable_regrip = false
 
 local WEAPON_NAMES = {
     ["arm0000"] = "Matilda IMP",
@@ -18,6 +19,7 @@ local WEAPON_NAMES = {
     ["arm0007"] = "Alligator Snapper",
     ["arm0100"] = "MSBG 500",
     ["arm0103"] = "W870 Police",
+    ["arm0104"] = "990-TAC",
     ["arm0400"] = "Requiem",
     ["arm0500"] = "Gal",
     ["arm0501"] = "Stiri REVO3 A1",
@@ -29,7 +31,7 @@ local WEAPON_NAMES = {
 
 local WEAPON_KEYS = {
     "arm0000", "arm0001", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007", 
-    "arm0100", "arm0103", "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601"
+    "arm0100", "arm0103", "arm0104", "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601"
 }
 
 local dropdown_options = {}
@@ -403,6 +405,79 @@ end
 
 load_defaults()
 
+local function get_player()
+    local cm = sdk.get_managed_singleton("app.CharacterManager")
+    if not cm then return nil end
+    local ctx = nil
+    pcall(function() ctx = cm:call("getPlayerContextRef") end)
+    return ctx
+end
+
+local function get_player_motion()
+    local ctx = get_player()
+    if not ctx then return nil end
+    local go = nil
+    pcall(function() go = ctx:call("get_GameObject") end)
+    if not go then return nil end
+    local motion_type = sdk.typeof("via.motion.Motion")
+    if not motion_type then return nil end
+    local motion = nil
+    pcall(function() motion = go:call("getComponent(System.Type)", motion_type) end)
+    return motion
+end
+
+local regrip_hook_log = {}
+local regrip_prev_mid = nil
+local regrip_prev_bank = nil
+local regrip_prev_frame = nil
+local regrip_prev_speed = nil
+
+re.on_pre_application_entry("UpdateBehavior", function()
+    if not disable_regrip then return end
+    local motion = get_player_motion()
+    if not motion then return end
+
+    local l8 = nil
+    pcall(function() l8 = motion:call("getLayer", 8) end)
+    if not l8 then return end
+
+    local mid = nil; pcall(function() mid = l8:call("get_MotionID") end)
+    local mbank = nil; pcall(function() mbank = l8:call("get_MotionBankID") end)
+    local frame = nil; pcall(function() frame = l8:call("get_Frame") end)
+    local speed = nil; pcall(function() speed = l8:call("get_Speed") end)
+
+    if mid and mid ~= 7001 then
+        regrip_prev_mid = mid
+        regrip_prev_bank = mbank
+        regrip_prev_frame = frame
+        regrip_prev_speed = speed
+    end
+end)
+
+re.on_pre_application_entry("LateUpdateBehavior", function()
+    if not disable_regrip then return end
+    local motion = get_player_motion()
+    if not motion then return end
+
+    local l8 = nil
+    pcall(function() l8 = motion:call("getLayer", 8) end)
+    if not l8 then return end
+
+    local mid = nil; pcall(function() mid = l8:call("get_MotionID") end)
+    local mbank = nil; pcall(function() mbank = l8:call("get_MotionBankID") end)
+
+    if mid == 7001 and mbank == 100 and regrip_prev_mid then
+        pcall(function() l8:call("set_MotionID", regrip_prev_mid) end)
+        pcall(function() l8:call("set_MotionBankID", regrip_prev_bank or 0) end)
+        pcall(function() l8:call("set_Frame", regrip_prev_frame or 0.0) end)
+        pcall(function() l8:call("set_Speed", regrip_prev_speed or 1.0) end)
+
+        local entry = "restored L8: mid=" .. tostring(regrip_prev_mid) .. " bank=" .. tostring(regrip_prev_bank)
+        if #regrip_hook_log >= 20 then table.remove(regrip_hook_log, 1) end
+        regrip_hook_log[#regrip_hook_log + 1] = entry
+    end
+end)
+
 local function apply_all_now()
     has_applied = false
     local count = apply_edits()
@@ -502,6 +577,26 @@ re.on_draw_ui(function()
             apply_all_now()
             ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
         end
+
+        local regrip_changed = false
+        regrip_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
+        if regrip_changed then
+            regrip_hook_log = {}
+            ui_state.status = "Regrip animation " .. (disable_regrip and "disabled" or "enabled")
+            if not disable_regrip then
+                regrip_prev_mid = nil
+                regrip_prev_bank = nil
+                regrip_prev_frame = nil
+                regrip_prev_speed = nil
+            end
+        end
+        if #regrip_hook_log > 0 and imgui.tree_node("Regrip Log") then
+            if imgui.button("Clear") then regrip_hook_log = {} end
+            for _, line in ipairs(regrip_hook_log) do
+                imgui.text(line)
+            end
+            imgui.tree_pop()
+        end
         imgui.separator()
 
         changed, selected_index = imgui.combo("Weapon", selected_index, dropdown_options)
@@ -553,7 +648,7 @@ re.on_draw_ui(function()
             ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
         end
         imgui.same_line()
-        if imgui.button("Reset to Defaults") then
+        if imgui.button("Reset Current Weapon") then
             local key = dropdown_items[selected_index]
             if key and rof_defaults[key] then
                 local def = rof_defaults[key]
@@ -614,19 +709,19 @@ re.on_draw_ui(function()
             imgui.text_colored(ui_state.status, color)
         end
 
-        local has_entries = false
-        for _ in pairs(rof_edits) do has_entries = true; break end
-        if has_entries and imgui.tree_node("Active Edits") then
-            for key, edit in pairs(rof_edits) do
-                local name = WEAPON_NAMES[key] or key
-                local mode = SHOOT_TYPES[(edit.TypeOfShoot or 0) + 1] or "?"
-                imgui.text(name .. " [" .. key .. "] " .. mode ..
-                    " | Interval=" .. string.format("%.3f", edit.ShotInterval or 0) ..
-                    " | BurstInterval=" .. string.format("%.3f", edit.BurstShotInterval or 0) ..
-                    " | BurstNum=" .. tostring(edit.BurstNum or 0))
-            end
-            imgui.tree_pop()
-        end
+        -- local has_entries = false
+        -- for _ in pairs(rof_edits) do has_entries = true; break end
+        -- if has_entries and imgui.tree_node("Active Edits") then
+        --     for key, edit in pairs(rof_edits) do
+        --         local name = WEAPON_NAMES[key] or key
+        --         local mode = SHOOT_TYPES[(edit.TypeOfShoot or 0) + 1] or "?"
+        --         imgui.text(name .. " [" .. key .. "] " .. mode ..
+        --             " | Interval=" .. string.format("%.3f", edit.ShotInterval or 0) ..
+        --             " | BurstInterval=" .. string.format("%.3f", edit.BurstShotInterval or 0) ..
+        --             " | BurstNum=" .. tostring(edit.BurstNum or 0))
+        --     end
+        --     imgui.tree_pop()
+        -- end
 
         imgui.tree_pop()
     end
