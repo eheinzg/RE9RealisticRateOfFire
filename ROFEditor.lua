@@ -5,10 +5,36 @@ local DEFAULTS_PATH = "ROFDefaults.json"
 local PROFILES_DIR = "ROFProfiles/"
 local PROFILES_INDEX = "ROFProfiles_index.json"
 local ROF_HOTKEYS_PATH = "ROFHotkeys.json"
+local SETTINGS_PATH = "ROFSettings.json"
 local rof_edits = {}
 local rof_defaults = {}
 local has_applied = false
-local disable_regrip = false
+
+local rof_settings_defaults = {
+    disable_regrip = true,
+    enable_aim_camera_shake = true,
+    show_fire_mode_overlay = true,
+    fire_mode_limit_semi_full = false,
+    overlay_use_rects = false,
+}
+local rof_settings = {}
+do
+    local saved = json.load_file(SETTINGS_PATH)
+    if saved and type(saved) == "table" then
+        for k, v in pairs(rof_settings_defaults) do
+            if saved[k] ~= nil then rof_settings[k] = saved[k]
+            else rof_settings[k] = v end
+        end
+    else
+        for k, v in pairs(rof_settings_defaults) do rof_settings[k] = v end
+    end
+end
+
+local function save_settings()
+    json.dump_file(SETTINGS_PATH, rof_settings)
+end
+
+local disable_regrip = rof_settings.disable_regrip
 
 local WEAPON_NAMES = {
     ["arm0000"] = "Matilda IMP",
@@ -45,7 +71,7 @@ local ui_state = {
     shot_interval = 0.6,
     burst_shot_interval = 5.0,
     burst_num = 3,
-    enable_aim_camera_shake = true,
+    enable_aim_camera_shake = rof_settings.enable_aim_camera_shake,
     status = ""
 }
 
@@ -462,9 +488,21 @@ end
 -- Hotkey system for fire mode toggle
 local hk = require("Hotkeys/Hotkeys")
 local FIRE_MODE_NAMES = { [0] = "Semi-Auto", [1] = "Full-Auto", [2] = "Burst" }
-local rof_hk_defaults = { ["Toggle Fire Mode"] = "V" }
-local rof_hk_settings = hk.recurse_def_settings(json.load_file(ROF_HOTKEYS_PATH) or {}, { hotkeys = rof_hk_defaults })
-hk.setup_hotkeys(rof_hk_settings.hotkeys, rof_hk_defaults)
+local show_fire_mode_overlay = rof_settings.show_fire_mode_overlay
+local fire_mode_limit_semi_full = rof_settings.fire_mode_limit_semi_full
+
+local rof_hk_default_settings = {
+    use_modifier = false,
+    use_pad_modifier = false,
+    hotkeys = {
+        ["Fire Mode Modifier"] = "R Mouse",
+        ["Fire Mode Toggle"] = "V",
+        ["Pad Fire Mode Modifier"] = "LT (L2)",
+        ["Pad Fire Mode Toggle"] = "A (X)",
+    }
+}
+local rof_hk_settings = hk.merge_tables({}, rof_hk_default_settings) and hk.recurse_def_settings(json.load_file(ROF_HOTKEYS_PATH) or {}, rof_hk_default_settings)
+hk.setup_hotkeys(rof_hk_settings.hotkeys)
 
 local function cycle_fire_mode()
     local eid_str, pe = get_equipped_weapon_id()
@@ -476,6 +514,11 @@ local function cycle_fire_mode()
     current = tonumber(current) or 0
 
     local next_mode = (current + 1) % 3
+    if fire_mode_limit_semi_full then
+        if next_mode == 2 then -- skip burst
+            next_mode = (next_mode + 1) % 3
+        end
+    end
 
     pcall(function() pe:set_field("_EquipShotType", next_mode) end)
 
@@ -510,14 +553,15 @@ local function cycle_fire_mode()
             ui_state.type_of_shoot = next_mode
         end
     end
-
-    ui_state.status = (WEAPON_NAMES[eid_str] or eid_str) .. ": " .. (FIRE_MODE_NAMES[next_mode] or "?")
+    ui_state.status = ""
 end
 
 local toggle_was_down = false
 
 re.on_application_entry("UpdateBehavior", function()
-    local is_down = hk.check_hotkey("Toggle Fire Mode", true)
+    local km = (not rof_hk_settings.use_modifier or hk.check_hotkey("Fire Mode Modifier", true)) and hk.check_hotkey("Fire Mode Toggle", true)
+    local pad = (not rof_hk_settings.use_pad_modifier or hk.check_hotkey("Pad Fire Mode Modifier", true)) and hk.check_hotkey("Pad Fire Mode Toggle", true)
+    local is_down = km or pad
     if is_down and not toggle_was_down then
         cycle_fire_mode()
     end
@@ -537,7 +581,6 @@ local function get_player_motion()
     return motion
 end
 
-local regrip_hook_log = {}
 local regrip_prev_mid = nil
 local regrip_prev_bank = nil
 local regrip_prev_frame = nil
@@ -582,10 +625,6 @@ re.on_pre_application_entry("LateUpdateBehavior", function()
         pcall(function() l8:call("set_MotionBankID", regrip_prev_bank or 0) end)
         pcall(function() l8:call("set_Frame", regrip_prev_frame or 0.0) end)
         pcall(function() l8:call("set_Speed", regrip_prev_speed or 1.0) end)
-
-        local entry = "restored L8: mid=" .. tostring(regrip_prev_mid) .. " bank=" .. tostring(regrip_prev_bank)
-        if #regrip_hook_log >= 20 then table.remove(regrip_hook_log, 1) end
-        regrip_hook_log[#regrip_hook_log + 1] = entry
     end
 end)
 
@@ -622,7 +661,9 @@ re.on_draw_ui(function()
 
         if #profile_state.names > 0 then
             local prof_changed
-            prof_changed, profile_state.selected = imgui.combo("Profile", profile_state.selected, profile_state.names)
+            local active_pname = profile_state.names[profile_state.selected] or ""
+            imgui.text_colored("Profile: " .. active_pname, 0xFFFFFF00)
+            prof_changed, profile_state.selected = imgui.combo("##Profile", profile_state.selected, profile_state.names)
             if profile_state.selected < 1 then profile_state.selected = 1 end
             if profile_state.selected > #profile_state.names then profile_state.selected = #profile_state.names end
             if prof_changed then
@@ -686,13 +727,16 @@ re.on_draw_ui(function()
         acs_changed, ui_state.enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake (Global)", ui_state.enable_aim_camera_shake)
         if acs_changed then
             apply_all_now()
+            rof_settings.enable_aim_camera_shake = ui_state.enable_aim_camera_shake
+            save_settings()
             ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
         end
 
         local regrip_changed = false
         regrip_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
         if regrip_changed then
-            regrip_hook_log = {}
+            rof_settings.disable_regrip = disable_regrip
+            save_settings()
             ui_state.status = "Regrip animation " .. (disable_regrip and "disabled" or "enabled")
             if not disable_regrip then
                 regrip_prev_mid = nil
@@ -701,22 +745,22 @@ re.on_draw_ui(function()
                 regrip_prev_speed = nil
             end
         end
-        if #regrip_hook_log > 0 and imgui.tree_node("Regrip Log") then
-            if imgui.button("Clear") then regrip_hook_log = {} end
-            for _, line in ipairs(regrip_hook_log) do
-                imgui.text(line)
-            end
-            imgui.tree_pop()
-        end
         imgui.separator()
 
         local equipped_key, pe = get_equipped_weapon_id()
         if pe then
             if equipped_key then
                 local eid_name = WEAPON_NAMES[equipped_key] or equipped_key
-                imgui.text("Equipped: ")
+                local current_type = 0
+                pcall(function() current_type = pe:get_field("_EquipShotType") end)
+                current_type = tonumber(current_type) or 0
+                local mode_name = FIRE_MODE_NAMES[current_type] or "?"
+
+                imgui.text_colored("Equipped: ", 0xFFFFFF00)
                 imgui.same_line()
                 imgui.text_colored(eid_name, 0xFFFFFF00)
+                imgui.same_line()
+                imgui.text_colored("(" .. mode_name .. ")", 0xFF0000FF)
 
                 -- Auto-select weapon if it changed
                 if equipped_key ~= last_equipped_id then
@@ -736,10 +780,10 @@ re.on_draw_ui(function()
                     last_equipped_id = equipped_key
                 end
             else
-                imgui.text("Equipped: (field nil)")
+                imgui.text_colored("Equipped: (field nil)", 0xFFFFFF00)
             end
         else
-            imgui.text("Equipped: (not detected)")
+            imgui.text_colored("Equipped: (not detected)", 0xFFFFFF00)
         end
 
         changed, selected_index = imgui.combo("Weapon", selected_index, dropdown_options)
@@ -790,12 +834,12 @@ re.on_draw_ui(function()
         end
 
         imgui.separator()
-        if imgui.button("Capture Defaults") then
-            local defaults = capture_defaults()
-            local n = 0; for _ in pairs(defaults) do n = n + 1 end
-            ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
-        end
-        imgui.same_line()
+        -- if imgui.button("Capture Defaults") then
+        --     local defaults = capture_defaults()
+        --     local n = 0; for _ in pairs(defaults) do n = n + 1 end
+        --     ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
+        -- end
+        -- imgui.same_line()
         if imgui.button("Reset Current Weapon") then
             local key = dropdown_items[selected_index]
             if key and rof_defaults[key] then
@@ -849,7 +893,13 @@ re.on_draw_ui(function()
             or ui_state.status:match("^Deleted profile:")
         if ui_state.status ~= "" and not profile_msg then
             local color = 0xFFFFFFFF
-            if ui_state.status:match("^Saved settings for") then
+            local is_status = ui_state.status:match(": ") 
+                or ui_state.status:match("^Saved settings for") 
+                or ui_state.status:match("^Reset ")
+                or ui_state.status:match("^Captured defaults")
+                or ui_state.status:match("^Applied live")
+
+            if is_status then
                 color = 0xFF00FF00
             elseif ui_state.status:match("^No defaults saved") then
                 color = 0xFF00FFFF
@@ -872,10 +922,55 @@ re.on_draw_ui(function()
         -- end
         
         if imgui.tree_node("Hotkeys") then
-            local hk_changed = hk.hotkey_setter("Toggle Fire Mode") or false
-            if hk_changed then
+            local changed = false
+            local wc = false
+
+            if imgui.button("Reset Hotkeys to Defaults") then
+                rof_hk_settings = hk.recurse_def_settings({}, rof_hk_default_settings)
+                wc = true
+                hk.reset_from_defaults_tbl(rof_hk_default_settings.hotkeys)
+            end
+
+            imgui.text_colored(" Keyboard and Mouse:", 0xFFFFFFAA)
+            changed, rof_hk_settings.use_modifier = imgui.checkbox("Use Modifier##kb_mod", rof_hk_settings.use_modifier); wc = wc or changed
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Require holding this button while pressing toggle")
+            end
+            imgui.same_line()
+            changed = hk.hotkey_setter("Fire Mode Modifier") or false; wc = wc or changed
+            changed = hk.hotkey_setter("Fire Mode Toggle", rof_hk_settings.use_modifier and "Fire Mode Modifier") or false; wc = wc or changed
+
+            imgui.text_colored(" Gamepad:", 0xFFFFFFAA)
+            changed, rof_hk_settings.use_pad_modifier = imgui.checkbox("Use Modifier##pad_mod", rof_hk_settings.use_pad_modifier); wc = wc or changed
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Require holding this button while pressing toggle")
+            end
+            imgui.same_line()
+            changed = hk.hotkey_setter("Pad Fire Mode Modifier") or false; wc = wc or changed
+            changed = hk.hotkey_setter("Pad Fire Mode Toggle", rof_hk_settings.use_pad_modifier and "Pad Fire Mode Modifier") or false; wc = wc or changed
+
+            if changed or wc then
                 hk.update_hotkey_table(rof_hk_settings.hotkeys)
                 json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
+            end
+
+            imgui.separator()
+            local ov_changed
+            ov_changed, show_fire_mode_overlay = imgui.checkbox("Show Fire Mode Overlay", show_fire_mode_overlay)
+            if ov_changed then
+                rof_settings.show_fire_mode_overlay = show_fire_mode_overlay
+                save_settings()
+            end
+            local lim_changed
+            lim_changed, fire_mode_limit_semi_full = imgui.checkbox("Limit to Semi/Full-Auto only", fire_mode_limit_semi_full)
+            if lim_changed then
+                rof_settings.fire_mode_limit_semi_full = fire_mode_limit_semi_full
+                save_settings()
+            end
+            local rect_changed
+            rect_changed, rof_settings.overlay_use_rects = imgui.checkbox("Use Rectangles for Overlay", rof_settings.overlay_use_rects)
+            if rect_changed then
+                save_settings()
             end
             imgui.tree_pop()
         end
@@ -892,6 +987,8 @@ local sm_typedef = sdk.find_type_definition("via.SceneManager")
 local sv_typedef = sdk.find_type_definition("via.SceneView")
 
 re.on_frame(function()
+    if not show_fire_mode_overlay then return end
+
     local eid_str, pe = get_equipped_weapon_id()
     if not pe or not eid_str then return end
 
@@ -921,13 +1018,19 @@ re.on_frame(function()
     end)
     if not size then return end
 
-    local dot_radius = 5.0
-    local dot_spacing = 16.0
-    local total_width = (dot_count - 1) * dot_spacing + dot_radius * 2
-    local win_w = total_width + 20
-    local win_h = dot_radius * 2 + 20
+    local rect_w = 16.0
+    local rect_h = 6.0
+    local circle_r = 5.0
+    local spacing = 20.0
 
-    local pos_x = size.w - win_w - 40
+    local item_w = rof_settings.overlay_use_rects and rect_w or (circle_r * 2)
+    local item_h = rof_settings.overlay_use_rects and rect_h or (circle_r * 2)
+
+    local total_width = (dot_count - 1) * spacing + item_w
+    local win_w = total_width + 20
+    local win_h = item_h + 20
+
+    local pos_x = size.w - win_w - 130
     local pos_y = size.h - win_h - 60
 
     imgui.set_next_window_pos({pos_x, pos_y}, 3, {0, 0})
@@ -937,9 +1040,13 @@ re.on_frame(function()
     local draw_list_x = 10
     local draw_list_y = 10
     for i = 0, dot_count - 1 do
-        local cx = draw_list_x + dot_radius + i * dot_spacing
-        local cy = draw_list_y + dot_radius
-        draw.filled_circle(pos_x + cx, pos_y + cy, dot_radius, 0xFFFFFFFF, 16)
+        local cx = draw_list_x + (i * spacing)
+        local cy = draw_list_y
+        if rof_settings.overlay_use_rects then
+            draw.filled_rect(pos_x + cx, pos_y + cy, rect_w, rect_h, 0x66FFFFFF)
+        else
+            draw.filled_circle(pos_x + cx + circle_r, pos_y + cy + circle_r, circle_r, 0x66FFFFFF, 16)
+        end
     end
 
     imgui.end_window()
