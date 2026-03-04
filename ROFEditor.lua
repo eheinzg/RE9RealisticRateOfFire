@@ -4,6 +4,7 @@
 local DEFAULTS_PATH = "ROFDefaults.json"
 local PROFILES_DIR = "ROFProfiles/"
 local PROFILES_INDEX = "ROFProfiles_index.json"
+local ROF_HOTKEYS_PATH = "ROFHotkeys.json"
 local rof_edits = {}
 local rof_defaults = {}
 local has_applied = false
@@ -458,6 +459,71 @@ local function apply_to_equipped(weapon_key, edit)
     return true
 end
 
+-- Hotkey system for fire mode toggle
+local hk = require("Hotkeys/Hotkeys")
+local FIRE_MODE_NAMES = { [0] = "Semi-Auto", [1] = "Full-Auto", [2] = "Burst" }
+local rof_hk_defaults = { ["Toggle Fire Mode"] = "V" }
+local rof_hk_settings = hk.recurse_def_settings(json.load_file(ROF_HOTKEYS_PATH) or {}, { hotkeys = rof_hk_defaults })
+hk.setup_hotkeys(rof_hk_settings.hotkeys, rof_hk_defaults)
+
+local function cycle_fire_mode()
+    local eid_str, pe = get_equipped_weapon_id()
+    if not pe or not eid_str then return end
+
+    local current = nil
+    pcall(function() current = pe:get_field("_EquipShotType") end)
+    if current == nil then return end
+    current = tonumber(current) or 0
+
+    local next_mode = (current + 1) % 3
+
+    pcall(function() pe:set_field("_EquipShotType", next_mode) end)
+
+    local edit = rof_edits[eid_str]
+    if edit then
+        edit.TypeOfShoot = next_mode
+    end
+
+    local catalogs = find_all_catalogs(get_scene())
+    for _, catalog in ipairs(catalogs) do
+        local dt = get_data_table(get_register(catalog))
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                local wd; pcall(function() wd = dt:call("get_Item", i) end)
+                if wd then
+                    local id = get_entry_id(wd)
+                    if id == eid_str then
+                        local sd = resolve_shoot_data(wd)
+                        if sd then
+                            set_field_safe(sd, "TypeOfShoot", next_mode)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if selected_index then
+        local sel_key = dropdown_items[selected_index]
+        if sel_key == eid_str then
+            ui_state.type_of_shoot = next_mode
+        end
+    end
+
+    ui_state.status = (WEAPON_NAMES[eid_str] or eid_str) .. ": " .. (FIRE_MODE_NAMES[next_mode] or "?")
+end
+
+local toggle_was_down = false
+
+re.on_application_entry("UpdateBehavior", function()
+    local is_down = hk.check_hotkey("Toggle Fire Mode", true)
+    if is_down and not toggle_was_down then
+        cycle_fire_mode()
+    end
+    toggle_was_down = is_down or false
+end)
+
 local function get_player_motion()
     local ctx = get_player()
     if not ctx then return nil end
@@ -648,7 +714,9 @@ re.on_draw_ui(function()
         if pe then
             if equipped_key then
                 local eid_name = WEAPON_NAMES[equipped_key] or equipped_key
-                imgui.text("Equipped: " .. eid_name .. " (" .. equipped_key .. ")")
+                imgui.text("Equipped: ")
+                imgui.same_line()
+                imgui.text_colored(eid_name, 0xFFFFFF00)
 
                 -- Auto-select weapon if it changed
                 if equipped_key ~= last_equipped_id then
@@ -802,7 +870,77 @@ re.on_draw_ui(function()
         --     end
         --     imgui.tree_pop()
         -- end
+        
+        if imgui.tree_node("Hotkeys") then
+            local hk_changed = hk.hotkey_setter("Toggle Fire Mode") or false
+            if hk_changed then
+                hk.update_hotkey_table(rof_hk_settings.hotkeys)
+                json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
+            end
+            imgui.tree_pop()
+        end
 
         imgui.tree_pop()
     end
+end)
+
+local fire_mode_display_timer = 0
+local fire_mode_display_duration = 2.0
+local last_displayed_mode = nil
+local sm_singleton = sdk.get_native_singleton("via.SceneManager")
+local sm_typedef = sdk.find_type_definition("via.SceneManager")
+local sv_typedef = sdk.find_type_definition("via.SceneView")
+
+re.on_frame(function()
+    local eid_str, pe = get_equipped_weapon_id()
+    if not pe or not eid_str then return end
+
+    local current = nil
+    pcall(function() current = pe:get_field("_EquipShotType") end)
+    if current == nil then return end
+    current = tonumber(current) or 0
+
+    if last_displayed_mode ~= current then
+        fire_mode_display_timer = os.clock()
+        last_displayed_mode = current
+    end
+
+    if os.clock() - fire_mode_display_timer > fire_mode_display_duration then return end
+
+    local dot_count = 0
+    if current == 0 then dot_count = 1
+    elseif current == 2 then dot_count = 3
+    elseif current == 1 then dot_count = 4
+    end
+    if dot_count == 0 then return end
+
+    local size = nil
+    pcall(function()
+        local view = sdk.call_native_func(sm_singleton, sm_typedef, "get_MainView")
+        size = sdk.call_native_func(view, sv_typedef, "get_WindowSize")
+    end)
+    if not size then return end
+
+    local dot_radius = 5.0
+    local dot_spacing = 16.0
+    local total_width = (dot_count - 1) * dot_spacing + dot_radius * 2
+    local win_w = total_width + 20
+    local win_h = dot_radius * 2 + 20
+
+    local pos_x = size.w - win_w - 40
+    local pos_y = size.h - win_h - 60
+
+    imgui.set_next_window_pos({pos_x, pos_y}, 3, {0, 0})
+    imgui.set_next_window_size({win_w, win_h}, 3)
+    imgui.begin_window("##FireModeOverlay", true, 129)
+
+    local draw_list_x = 10
+    local draw_list_y = 10
+    for i = 0, dot_count - 1 do
+        local cx = draw_list_x + dot_radius + i * dot_spacing
+        local cy = draw_list_y + dot_radius
+        draw.filled_circle(pos_x + cx, pos_y + cy, dot_radius, 0xFFFFFFFF, 16)
+    end
+
+    imgui.end_window()
 end)
