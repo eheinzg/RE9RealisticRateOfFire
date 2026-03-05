@@ -604,6 +604,7 @@ local smooth_semi = {
     shoot_held = false,
     active = false,
     display_mode = nil,
+    last_pe = nil,
 }
 
 local function smooth_semi_set_dss(pe, value)
@@ -719,7 +720,19 @@ re.on_application_entry("UpdateHID", function()
     end
 
     local pe = get_player_equipment()
-    if not pe then return end
+    if not pe then
+        smooth_semi.last_pe = nil
+        return
+    end
+
+    local pe_changed = (pe ~= smooth_semi.last_pe)
+    smooth_semi.last_pe = pe
+
+    if pe_changed and smooth_semi.active then
+        smooth_semi.has_fired = false
+        smooth_semi.shoot_held = false
+        smooth_semi.active = false
+    end
 
     local shot_type = nil
     pcall(function() shot_type = pe:get_field("_EquipShotType") end)
@@ -729,8 +742,8 @@ re.on_application_entry("UpdateHID", function()
         if not smooth_semi.active then
             smooth_semi.active = true
             smooth_semi.display_mode = 0
-            pcall(function() pe:set_field("_EquipShotType", 1) end)
         end
+        pcall(function() pe:set_field("_EquipShotType", 1) end)
 
         local rt_down = hk.check_pad_button("RT (R2)", true) or false
         local lmb_down = hk.check_mouse_button("L Mouse", true) or false
