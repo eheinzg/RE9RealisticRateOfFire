@@ -13,6 +13,7 @@ local has_applied = false
 local rof_settings_defaults = {
     disable_regrip = true,
     disable_select_fire = false,
+    smooth_semi_auto = false,
     enable_aim_camera_shake = true,
     show_fire_mode_overlay = true,
     fire_mode_limit_semi_full = false,
@@ -592,6 +593,37 @@ local rof_hk_default_settings = {
 local rof_hk_settings = hk.merge_tables({}, rof_hk_default_settings) and hk.recurse_def_settings(json.load_file(ROF_HOTKEYS_PATH) or {}, rof_hk_default_settings)
 hk.setup_hotkeys(rof_hk_settings.hotkeys)
 
+-- ============================================================
+-- Smooth Semi-Auto
+-- Allows one shot per trigger pull on full-auto weapons.
+-- After the first execFire, sets DisableShootState on the
+-- weapon object to block further shots. Resets on release.
+-- ============================================================
+local smooth_semi = {
+    has_fired = false,
+    shoot_held = false,
+    active = false,
+    display_mode = nil,
+}
+
+local function smooth_semi_set_dss(pe, value)
+    if not pe then return end
+    local weapon = nil
+    pcall(function() weapon = pe:call("getEquipWeapon") end)
+    if not weapon then return end
+    local wtype = weapon:get_type_definition()
+    if not wtype then return end
+    local f = wtype:get_field("<DisableShootState>k__BackingField")
+    if f then
+        weapon:write_byte(f:get_offset_from_base(), value and 1 or 0)
+    end
+end
+
+local function smooth_semi_get_display_mode()
+    if smooth_semi.active then return 0 end
+    return nil
+end
+
 local function cycle_fire_mode()
     if rof_settings.disable_select_fire then return end
 
@@ -602,7 +634,14 @@ local function cycle_fire_mode()
     local current = nil
     pcall(function() current = pe:get_field("_EquipShotType") end)
     if current == nil then return end
-    current = tonumber(current) or 0
+    current = smooth_semi_get_display_mode() or tonumber(current) or 0
+
+    if smooth_semi.active then
+        smooth_semi.active = false
+        smooth_semi.display_mode = nil
+        smooth_semi.has_fired = false
+        smooth_semi_set_dss(pe, false)
+    end
 
     local edit = rof_edits[eid_str] or {}
     local allow = {
@@ -664,6 +703,83 @@ re.on_application_entry("UpdateBehavior", function()
     toggle_was_down = is_down or false
 end)
 
+re.on_application_entry("UpdateHID", function()
+    if not rof_settings.smooth_semi_auto then
+        if smooth_semi.active then
+            smooth_semi.active = false
+            smooth_semi.has_fired = false
+            smooth_semi.display_mode = nil
+            local pe = get_player_equipment()
+            if pe then
+                pcall(function() pe:set_field("_EquipShotType", 0) end)
+                smooth_semi_set_dss(pe, false)
+            end
+        end
+        return
+    end
+
+    local pe = get_player_equipment()
+    if not pe then return end
+
+    local shot_type = nil
+    pcall(function() shot_type = pe:get_field("_EquipShotType") end)
+    shot_type = tonumber(shot_type) or -1
+
+    if shot_type == 0 or smooth_semi.active then
+        if not smooth_semi.active then
+            smooth_semi.active = true
+            smooth_semi.display_mode = 0
+            pcall(function() pe:set_field("_EquipShotType", 1) end)
+        end
+
+        local rt_down = hk.check_pad_button("RT (R2)", true) or false
+        local lmb_down = hk.check_mouse_button("L Mouse", true) or false
+        local shoot_held = rt_down or lmb_down
+        if not shoot_held and smooth_semi.shoot_held then
+            smooth_semi.has_fired = false
+            smooth_semi_set_dss(pe, false)
+        end
+        smooth_semi.shoot_held = shoot_held
+
+        if shot_type ~= 0 and shot_type ~= 1 then
+            smooth_semi.active = false
+            smooth_semi.display_mode = nil
+            smooth_semi.has_fired = false
+            smooth_semi_set_dss(pe, false)
+        end
+    else
+        smooth_semi.active = false
+        smooth_semi.display_mode = nil
+        smooth_semi.has_fired = false
+    end
+end)
+
+do
+    local equip_td = sdk.find_type_definition("app.PlayerEquipment")
+    if equip_td then
+        local exec_fire = equip_td:get_method("execFire")
+        if exec_fire then
+            local pending_pe = nil
+            sdk.hook(exec_fire,
+                function(args)
+                    if not smooth_semi.active then return end
+                    if not smooth_semi.has_fired then
+                        smooth_semi.has_fired = true
+                        pcall(function() pending_pe = sdk.to_managed_object(args[2]) end)
+                    end
+                end,
+                function(retval)
+                    if pending_pe then
+                        smooth_semi_set_dss(pending_pe, true)
+                        pending_pe = nil
+                    end
+                    return retval
+                end
+            )
+        end
+    end
+end
+
 local function get_player_motion()
     local ctx = get_player()
     if not ctx then return nil end
@@ -677,52 +793,89 @@ local function get_player_motion()
     return motion
 end
 
-local regrip_prev_mid = nil
-local regrip_prev_bank = nil
-local regrip_prev_frame = nil
-local regrip_prev_speed = nil
+local regrip_action_log = {}
+local regrip_hook_status = "searching..."
 
-re.on_pre_application_entry("UpdateBehavior", function()
-    if not disable_regrip then return end
-    local motion = get_player_motion()
-    if not motion then return end
-
-    local l8 = nil
-    pcall(function() l8 = motion:call("getLayer", 8) end)
-    if not l8 then return end
-
-    local mid = nil; pcall(function() mid = l8:call("get_MotionID") end)
-    local mbank = nil; pcall(function() mbank = l8:call("get_MotionBankID") end)
-    local frame = nil; pcall(function() frame = l8:call("get_Frame") end)
-    local speed = nil; pcall(function() speed = l8:call("get_Speed") end)
-
-    if mid and mid ~= 7001 then
-        regrip_prev_mid = mid
-        regrip_prev_bank = mbank
-        regrip_prev_frame = frame
-        regrip_prev_speed = speed
+do
+    local cp_type = sdk.find_type_definition("app.Cp_A000Updater")
+    if not cp_type then
+        local parent_type = nil
+        local child = sdk.find_type_definition("app.Cp_A000Updater")
+        if child then parent_type = child:get_parent_type() end
+        if not parent_type then
+            regrip_hook_status = "app.Cp_A000Updater not found"
+        end
     end
-end)
 
-re.on_pre_application_entry("LateUpdateBehavior", function()
-    if not disable_regrip then return end
-    local motion = get_player_motion()
-    if not motion then return end
-
-    local l8 = nil
-    pcall(function() l8 = motion:call("getLayer", 8) end)
-    if not l8 then return end
-
-    local mid = nil; pcall(function() mid = l8:call("get_MotionID") end)
-    local mbank = nil; pcall(function() mbank = l8:call("get_MotionBankID") end)
-
-    if mid == 7001 and mbank == 100 and regrip_prev_mid then
-        pcall(function() l8:call("set_MotionID", regrip_prev_mid) end)
-        pcall(function() l8:call("set_MotionBankID", regrip_prev_bank or 0) end)
-        pcall(function() l8:call("set_Frame", regrip_prev_frame or 0.0) end)
-        pcall(function() l8:call("set_Speed", regrip_prev_speed or 1.0) end)
+    local function find_method_in_hierarchy(base_type, method_name)
+        local t = base_type
+        while t do
+            local m = t:get_method(method_name)
+            if m then return m end
+            local methods = t:get_methods()
+            for _, m2 in ipairs(methods) do
+                if m2:get_name() == method_name then return m2 end
+            end
+            t = t:get_parent_type()
+        end
+        return nil
     end
-end)
+
+    if cp_type then
+        local req_method = find_method_in_hierarchy(cp_type, "requestTransitionFsmNode")
+        if req_method then
+            regrip_hook_status = "hooked requestTransitionFsmNode"
+            sdk.hook(req_method,
+                function(args)
+                    local display = nil
+                    for i = 3, 5 do
+                        if args[i] then
+                            pcall(function()
+                                local obj = sdk.to_managed_object(args[i])
+                                if obj then
+                                    local name = nil
+                                    pcall(function() name = obj:get_field("_name") end)
+                                    if not name then pcall(function() name = obj:get_field("Name") end) end
+                                    if not name then pcall(function() name = obj:get_field("_Name") end) end
+                                    if not name then pcall(function() name = obj:call("get_Name") end) end
+                                    if not name then pcall(function() name = obj:call("getString") end) end
+
+                                    local hash = nil
+                                    pcall(function() hash = obj:get_field("_hash") end)
+                                    if not hash then pcall(function() hash = obj:get_field("Hash") end) end
+                                    if not hash then pcall(function() hash = obj:get_field("_Hash") end) end
+                                    if not hash then pcall(function() hash = obj:call("get_Hash") end) end
+
+                                    if name and tostring(name) ~= "app.NameHash" then
+                                        display = tostring(name)
+                                    elseif hash then
+                                        display = "hash:" .. tostring(hash)
+                                    end
+                                end
+                            end)
+                            if display then break end
+                        end
+                    end
+
+                    if display then
+                        if #regrip_action_log >= 40 then table.remove(regrip_action_log, 1) end
+                        regrip_action_log[#regrip_action_log + 1] = display
+
+                        if disable_regrip then
+                            if display:lower():find("regrip") or display == "hash:3980252629" then
+                                regrip_action_log[#regrip_action_log + 1] = ">> BLOCKED: " .. display
+                                return sdk.PreHookResult.SKIP_ORIGINAL
+                            end
+                        end
+                    end
+                end,
+                function(retval) return retval end
+            )
+        else
+            regrip_hook_status = "requestTransitionFsmNode not found"
+        end
+    end
+end
 
 local function apply_all_now()
     has_applied = false
@@ -837,12 +990,14 @@ re.on_draw_ui(function()
             rof_settings.disable_regrip = disable_regrip
             save_settings()
             ui_state.status = "Regrip animation " .. (disable_regrip and "disabled" or "enabled")
-            if not disable_regrip then
-                regrip_prev_mid = nil
-                regrip_prev_bank = nil
-                regrip_prev_frame = nil
-                regrip_prev_speed = nil
+        end
+        if imgui.tree_node("Action Log") then
+            imgui.text("Hook: " .. regrip_hook_status)
+            if imgui.button("Clear") then regrip_action_log = {} end
+            for _, entry in ipairs(regrip_action_log) do
+                imgui.text(entry)
             end
+            imgui.tree_pop()
         end
 
         local sf_changed
@@ -850,6 +1005,24 @@ re.on_draw_ui(function()
         if sf_changed then
             save_settings()
             ui_state.status = "Select fire " .. (rof_settings.disable_select_fire and "disabled" or "enabled")
+        end
+
+        local ssa_changed
+        ssa_changed, rof_settings.smooth_semi_auto = imgui.checkbox("Smooth Semi-Auto", rof_settings.smooth_semi_auto)
+        if ssa_changed then
+            save_settings()
+            smooth_semi.has_fired = false
+            smooth_semi.shoot_held = false
+            if not rof_settings.smooth_semi_auto and smooth_semi.active then
+                smooth_semi.active = false
+                smooth_semi.display_mode = nil
+                local pe = get_player_equipment()
+                if pe then
+                    pcall(function() pe:set_field("_EquipShotType", 0) end)
+                    smooth_semi_set_dss(pe, false)
+                end
+            end
+            ui_state.status = "Smooth Semi-Auto " .. (rof_settings.smooth_semi_auto and "enabled" or "disabled")
         end
         imgui.separator()
 
@@ -867,7 +1040,7 @@ re.on_draw_ui(function()
                 if is_known then
                     local current_type = 0
                     pcall(function() current_type = pe:get_field("_EquipShotType") end)
-                    current_type = tonumber(current_type) or 0
+                    current_type = smooth_semi_get_display_mode() or tonumber(current_type) or 0
                     local mode_name = FIRE_MODE_NAMES[current_type] or "?"
 
                     imgui.same_line()
@@ -1128,7 +1301,7 @@ re.on_frame(function()
     local current = nil
     pcall(function() current = pe:get_field("_EquipShotType") end)
     if current == nil then return end
-    current = tonumber(current) or 0
+    current = smooth_semi_get_display_mode() or tonumber(current) or 0
 
     if last_displayed_mode ~= current then
         fire_mode_display_timer = os.clock()
