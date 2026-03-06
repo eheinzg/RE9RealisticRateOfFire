@@ -949,6 +949,21 @@ re.on_application_entry("UpdateHID", function()
         smooth_semi_set_dss(pe, false)
     end
 
+    if weapon_changed and cur_weapon_id then
+        local edit = rof_edits[cur_weapon_id] or {}
+        local allow_semi = edit.allow_semi ~= false
+        local allow_full = edit.allow_full ~= false
+        local allow_burst = edit.allow_burst ~= false
+        local cur_type = nil
+        pcall(function() cur_type = pe:get_field("_EquipShotType") end)
+        cur_type = tonumber(cur_type) or 0
+        local allowed = { [0] = allow_semi, [1] = allow_full, [2] = allow_burst }
+        if not allowed[cur_type] then
+            local fallback = allow_semi and 0 or (allow_burst and 2 or (allow_full and 1 or 0))
+            pcall(function() pe:set_field("_EquipShotType", fallback) end)
+        end
+    end
+
     local shot_type = nil
     pcall(function() shot_type = pe:get_field("_EquipShotType") end)
     shot_type = tonumber(shot_type) or -1
