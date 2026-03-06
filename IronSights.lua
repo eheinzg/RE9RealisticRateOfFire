@@ -15,18 +15,21 @@ local WEAPON_NAMES = {
     ["arm0100"] = "MSBG 500",
     ["arm0103"] = "W870 Police",
     ["arm0104"] = "990-TAC",
-    ["arm0400"] = "Requiem",
+    ["arm0400_leon"]  = "Requiem (Leon)",
+    ["arm0400_grace"] = "Requiem (Grace)",
     ["arm0500"] = "Gal",
     ["arm0501"] = "Stiri REVO3 A1",
     ["arm0503"] = "Clatter Carbine",
     ["arm0505"] = "Freya's Needle",
     ["arm0600"] = "Classic 70",
     ["arm0601"] = "Marksman 1A",
+    ["arm0700"] = "RPG-7",
 }
 
 local WEAPON_KEYS = {
     "arm0000", "arm0001", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007",
-    "arm0100", "arm0103", "arm0104", "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601"
+    "arm0100", "arm0103", "arm0104", "arm0400_leon", "arm0400_grace",
+    "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601", "arm0700"
 }
 
 local dropdown_options = {}
@@ -38,6 +41,8 @@ end
 
 local selected_index = 1
 local last_equipped_id = nil
+local copy_all_confirm = false
+local reset_confirm = false
 
 -- Per-weapon offsets: { ["arm0000"] = { x=0, y=0, z=0 }, ... }
 local weapon_offsets = {}
@@ -52,7 +57,7 @@ local function save_offsets()
 end
 load_offsets()
 
-local prefs = { hide_reticle = false, bullet_from_muzzle = false, transition_duration = 0.25 }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, transition_duration = 0.25 }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
@@ -290,6 +295,7 @@ end
 
 local camera_offset_applied = false
 local cached_weapon_id = nil
+local cached_character = nil
 
 local function get_player_context()
     local cm = sdk.get_managed_singleton("app.CharacterManager")
@@ -318,6 +324,15 @@ local function get_equipped_weapon_id_from_ctx(ctx)
     return eid_str
 end
 
+local SHARED_WEAPONS = { ["arm0400"] = true }
+
+local function get_offset_key(weapon_id, character)
+    if weapon_id and SHARED_WEAPONS[weapon_id] and character then
+        return weapon_id .. "_" .. character
+    end
+    return weapon_id
+end
+
 local function quat_rotate_vec3(q, v)
     local qx, qy, qz, qw = q.x, q.y, q.z, q.w
     local ux, uy, uz = qx, qy, qz
@@ -339,10 +354,17 @@ re.on_pre_application_entry("LockScene", function()
         local view_mode = nil
         pcall(function() view_mode = ctx:get_field("<CurrentViewMode>k__BackingField") end)
         cached_view_mode = tonumber(view_mode) or -1
-        cached_weapon_id = get_equipped_weapon_id_from_ctx(ctx)
+
+        local is_leon = nil
+        pcall(function() is_leon = ctx:call("get_IsCp_A0Character") end)
+        cached_character = is_leon and "leon" or "grace"
+
+        local raw_id = get_equipped_weapon_id_from_ctx(ctx)
+        cached_weapon_id = get_offset_key(raw_id, cached_character)
     else
         cached_view_mode = -1
         cached_weapon_id = nil
+        cached_character = nil
     end
 
     local cam = sdk.get_primary_camera()
@@ -407,8 +429,9 @@ re.on_draw_ui(function()
 
         local equipped_id = cached_weapon_id
         if equipped_id then
+            local char_label = cached_character and (" [" .. cached_character:sub(1,1):upper() .. cached_character:sub(2) .. "]") or ""
             local eid_name = WEAPON_NAMES[equipped_id] or equipped_id
-            imgui.text_colored("Equipped: " .. eid_name, 0xFFFFFF00)
+            imgui.text_colored("Equipped: " .. eid_name .. char_label, 0xFFFFFF00)
 
             if equipped_id ~= last_equipped_id then
                 for i, key in ipairs(dropdown_items) do
@@ -450,19 +473,43 @@ re.on_draw_ui(function()
                 save_offsets()
             end
 
-            if imgui.button("Reset##offset") then
-                ui_offset.x = 0.0
-                ui_offset.y = 0.0
-                ui_offset.z = 0.0
-                weapon_offsets[key] = nil
-                save_offsets()
+            if not reset_confirm then
+                if imgui.button("Reset##offset") then
+                    reset_confirm = true
+                end
+            else
+                imgui.text_colored("Reset this weapon?", 0xFF00FFFF)
+                if imgui.button("Yes##reset") then
+                    ui_offset.x = 0.0
+                    ui_offset.y = 0.0
+                    ui_offset.z = 0.0
+                    weapon_offsets[key] = nil
+                    save_offsets()
+                    reset_confirm = false
+                end
+                imgui.same_line()
+                if imgui.button("No##reset") then
+                    reset_confirm = false
+                end
             end
             imgui.same_line()
-            if imgui.button("Copy to All") then
-                for _, wk in ipairs(WEAPON_KEYS) do
-                    weapon_offsets[wk] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
+            if not copy_all_confirm then
+                if imgui.button("Copy to All") then
+                    copy_all_confirm = true
                 end
-                save_offsets()
+            else
+                imgui.text_colored("Apply to all weapons?", 0xFF00FFFF)
+                if imgui.button("Yes") then
+                    for _, wk in ipairs(WEAPON_KEYS) do
+                        weapon_offsets[wk] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
+                    end
+                    save_offsets()
+                    copy_all_confirm = false
+                end
+                imgui.same_line()
+                if imgui.button("No") then
+                    copy_all_confirm = false
+                end
             end
         end
 
@@ -485,7 +532,7 @@ re.on_draw_ui(function()
                 save_prefs()
             end
             if bullet_from_muzzle then
-                imgui.text("  Joint: " .. muzzle_debug_joint_name)
+                -- imgui.text("  Joint: " .. muzzle_debug_joint_name)
                 if muzzle_debug_joint_name == "NOT FOUND" and muzzle_debug_all_joints ~= "" then
                     imgui.text_colored("  All joints: " .. muzzle_debug_all_joints, 0xFF00FFFF)
                 end
