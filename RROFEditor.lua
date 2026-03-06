@@ -37,7 +37,7 @@ local function save_settings()
     json.dump_file(SETTINGS_PATH, rof_settings)
 end
 
-local disable_regrip = rof_settings.disable_regrip
+local disable_regrip = true
 
 local WEAPON_NAMES = {
     ["arm0000"] = "Matilda IMP",
@@ -206,6 +206,10 @@ if #profile_state.names > 0 and profile_state.names[profile_state.selected] then
     load_profile(profile_state.names[profile_state.selected])
 end
 
+local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
+local TYPE_WeaponCatalogRegister = sdk.typeof("app.WeaponCatalogRegister")
+local TYPE_Motion = sdk.typeof("via.motion.Motion")
+
 local function try_call(obj, method)
     local r; pcall(function() r = obj:call(method) end); return r
 end
@@ -275,8 +279,8 @@ local function find_all_catalogs(scene)
     local results = {}
     if not scene then return results end
     local seen = {}
-    for _, name in ipairs({ "WeaponCatalog" }) do
-        local obj = scene:call("findGameObject(System.String)", name)
+    do
+        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
         if obj then
             local addr = obj:get_address()
             if not seen[addr] then
@@ -285,10 +289,9 @@ local function find_all_catalogs(scene)
             end
         end
     end
-    local reg_type = sdk.typeof("app.WeaponCatalogRegister")
-    if reg_type then
+    if TYPE_WeaponCatalogRegister then
         local all_components = nil
-        pcall(function() all_components = scene:call("findComponents(System.Type)", reg_type) end)
+        pcall(function() all_components = scene:call("findComponents(System.Type)", TYPE_WeaponCatalogRegister) end)
         if all_components then
             local n = 0; pcall(function() n = all_components:call("get_Count") end)
             for i = 0, n - 1 do
@@ -309,14 +312,19 @@ local function find_all_catalogs(scene)
     return results
 end
 
-local function get_register(catalog)
-    if not catalog then return nil end
+local REGISTER_TYPES = {}
+do
     for _, tn in ipairs({ "app.WeaponCatalogRegister", "chainsaw.WeaponCatalogRegister" }) do
         local t = sdk.typeof(tn)
-        if t then
-            local r = catalog:call("getComponent(System.Type)", t)
-            if r then return r end
-        end
+        if t then REGISTER_TYPES[#REGISTER_TYPES + 1] = t end
+    end
+end
+
+local function get_register(catalog)
+    if not catalog then return nil end
+    for _, t in ipairs(REGISTER_TYPES) do
+        local r = catalog:call("getComponent(System.Type)", t)
+        if r then return r end
     end
 end
 
@@ -340,9 +348,11 @@ local function normalize_key(value)
     if s:match("^[%a_]+%d+$") then return s end
 end
 
+local WEAPON_ID_FIELDS = { "_WeaponID", "WeaponID", "_WeaponId" }
+
 local function get_entry_id(weapon_data)
     if not weapon_data then return nil end
-    for _, f in ipairs({ "_WeaponID", "WeaponID", "_WeaponId" }) do
+    for _, f in ipairs(WEAPON_ID_FIELDS) do
         local k = normalize_key(try_field(weapon_data, f))
         if k then return k end
     end
@@ -536,28 +546,44 @@ local function get_player_equipment()
     if not ctx then return nil end
     local go = nil
     pcall(function() go = ctx:call("get_GameObject") end)
-    if not go then return nil end
-    local pe_type = sdk.typeof("app.PlayerEquipment")
-    if not pe_type then return nil end
+    if not go or not TYPE_PlayerEquipment then return nil end
     local pe = nil
-    pcall(function() pe = go:call("getComponent(System.Type)", pe_type) end)
+    pcall(function() pe = go:call("getComponent(System.Type)", TYPE_PlayerEquipment) end)
     return pe
 end
 
-local function get_equipped_weapon_id()
-    local pe = get_player_equipment()
-    if not pe then return nil, nil end
-
+local function get_weapon_id_from_pe(pe)
+    if not pe then return nil end
     local eid = nil
     pcall(function() eid = pe:get_field("<EquipWeaponID>k__BackingField") end)
-    if not eid then return nil, pe end
-
+    if not eid then return nil end
     local eid_str = nil
     pcall(function() eid_str = eid:call("ToString()") end)
     if not eid_str then
         pcall(function() eid_str = tostring(eid:get_field("value__")) end)
     end
-    return eid_str, pe
+    return eid_str
+end
+
+local function get_equipped_weapon_id()
+    local pe = get_player_equipment()
+    if not pe then return nil, nil end
+    return get_weapon_id_from_pe(pe), pe
+end
+
+local cached_pe = nil
+local cached_eid = nil
+local cached_frame = -1
+
+local function get_equipped_weapon_id_cached()
+    local frame = re.get_frame_count and re.get_frame_count() or -1
+    if frame == cached_frame and cached_pe then
+        return cached_eid, cached_pe
+    end
+    cached_pe = get_player_equipment()
+    cached_eid = get_weapon_id_from_pe(cached_pe)
+    cached_frame = frame
+    return cached_eid, cached_pe
 end
 
 local function apply_to_equipped(weapon_key, edit)
@@ -646,7 +672,7 @@ end
 local function cycle_fire_mode()
     if rof_settings.disable_select_fire then return end
 
-    local eid_str, pe = get_equipped_weapon_id()
+    local eid_str, pe = get_equipped_weapon_id_cached()
     if not pe or not eid_str then return end
     if not WEAPON_NAMES[eid_str] then return end
 
@@ -729,7 +755,7 @@ re.on_application_entry("UpdateBehavior", function()
 end)
 
 local function get_burst_num_for_equipped()
-    local eid_str = get_equipped_weapon_id()
+    local eid_str = cached_eid or get_weapon_id_from_pe(get_player_equipment())
     if not eid_str then return 3 end
     local edit = rof_edits[eid_str]
     if edit and edit.BurstNum then return edit.BurstNum end
@@ -740,6 +766,7 @@ end
 
 re.on_application_entry("UpdateHID", function()
     local pe = get_player_equipment()
+    cached_pe = pe
 
     -- Smooth Semi-Auto cleanup when disabled
     if not rof_settings.smooth_semi_auto then
@@ -776,7 +803,8 @@ re.on_application_entry("UpdateHID", function()
         return
     end
 
-    local cur_weapon_id = get_equipped_weapon_id()
+    local cur_weapon_id = get_weapon_id_from_pe(pe)
+    cached_eid = cur_weapon_id
 
     local pe_changed = (pe ~= smooth_semi.last_pe)
     local weapon_changed = (cur_weapon_id ~= smooth_semi.last_weapon_id)
@@ -907,11 +935,9 @@ local function get_player_motion()
     if not ctx then return nil end
     local go = nil
     pcall(function() go = ctx:call("get_GameObject") end)
-    if not go then return nil end
-    local motion_type = sdk.typeof("via.motion.Motion")
-    if not motion_type then return nil end
+    if not go or not TYPE_Motion then return nil end
     local motion = nil
-    pcall(function() motion = go:call("getComponent(System.Type)", motion_type) end)
+    pcall(function() motion = go:call("getComponent(System.Type)", TYPE_Motion) end)
     return motion
 end
 
@@ -921,12 +947,7 @@ local regrip_hook_status = "searching..."
 do
     local cp_type = sdk.find_type_definition("app.Cp_A000Updater")
     if not cp_type then
-        local parent_type = nil
-        local child = sdk.find_type_definition("app.Cp_A000Updater")
-        if child then parent_type = child:get_parent_type() end
-        if not parent_type then
-            regrip_hook_status = "app.Cp_A000Updater not found"
-        end
+        regrip_hook_status = "app.Cp_A000Updater not found"
     end
 
     local function find_method_in_hierarchy(base_type, method_name)
@@ -949,6 +970,7 @@ do
             regrip_hook_status = "hooked requestTransitionFsmNode"
             sdk.hook(req_method,
                 function(args)
+                    if not disable_regrip then return end
                     local display = nil
                     for i = 3, 5 do
                         if args[i] then
@@ -980,14 +1002,11 @@ do
                     end
 
                     if display then
-                        if #regrip_action_log >= 40 then table.remove(regrip_action_log, 1) end
-                        regrip_action_log[#regrip_action_log + 1] = display
-
-                        if disable_regrip then
-                            if display:lower():find("regrip") or display == "hash:3980252629" then
-                                regrip_action_log[#regrip_action_log + 1] = ">> BLOCKED: " .. display
-                                return sdk.PreHookResult.SKIP_ORIGINAL
-                            end
+                        -- if #regrip_action_log >= 40 then table.remove(regrip_action_log, 1) end
+                        -- regrip_action_log[#regrip_action_log + 1] = display
+                        if display:lower():find("regrip") or display == "hash:3980252629" then
+                            -- regrip_action_log[#regrip_action_log + 1] = ">> BLOCKED: " .. display
+                            return sdk.PreHookResult.SKIP_ORIGINAL
                         end
                     end
                 end,
@@ -1098,7 +1117,7 @@ re.on_draw_ui(function()
         imgui.separator()
 
         local acs_changed = false
-        acs_changed, ui_state.enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake (Global)", ui_state.enable_aim_camera_shake)
+        acs_changed, ui_state.enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake", ui_state.enable_aim_camera_shake)
         if acs_changed then
             apply_all_now()
             rof_settings.enable_aim_camera_shake = ui_state.enable_aim_camera_shake
@@ -1106,21 +1125,21 @@ re.on_draw_ui(function()
             ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
         end
 
-        local regrip_changed = false
-        regrip_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
-        if regrip_changed then
-            rof_settings.disable_regrip = disable_regrip
-            save_settings()
-            ui_state.status = "Regrip animation " .. (disable_regrip and "disabled" or "enabled")
-        end
-        if imgui.tree_node("Action Log") then
-            imgui.text("Hook: " .. regrip_hook_status)
-            if imgui.button("Clear") then regrip_action_log = {} end
-            for _, entry in ipairs(regrip_action_log) do
-                imgui.text(entry)
-            end
-            imgui.tree_pop()
-        end
+        -- local regrip_changed = false
+        -- regrip_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
+        -- if regrip_changed then
+        --     rof_settings.disable_regrip = disable_regrip
+        --     save_settings()
+        --     ui_state.status = "Regrip animation " .. (disable_regrip and "disabled" or "enabled")
+        -- end
+        -- if imgui.tree_node("Action Log") then
+        --     imgui.text("Hook: " .. regrip_hook_status)
+        --     if imgui.button("Clear") then regrip_action_log = {} end
+        --     for _, entry in ipairs(regrip_action_log) do
+        --         imgui.text(entry)
+        --     end
+        --     imgui.tree_pop()
+        -- end
 
         local sf_changed
         sf_changed, rof_settings.disable_select_fire = imgui.checkbox("Disable Select Fire", rof_settings.disable_select_fire)
@@ -1130,7 +1149,7 @@ re.on_draw_ui(function()
         end
 
         local ssa_changed
-        ssa_changed, rof_settings.smooth_semi_auto = imgui.checkbox("Smooth Semi-Auto", rof_settings.smooth_semi_auto)
+        ssa_changed, rof_settings.smooth_semi_auto = imgui.checkbox("Reduced Semi-Auto Recoil", rof_settings.smooth_semi_auto)
         if ssa_changed then
             save_settings()
             smooth_semi.has_fired = false
@@ -1148,7 +1167,7 @@ re.on_draw_ui(function()
         end
 
         local sb_changed
-        sb_changed, rof_settings.smooth_burst = imgui.checkbox("Smooth Burst", rof_settings.smooth_burst)
+        sb_changed, rof_settings.smooth_burst = imgui.checkbox("Reduced Burst Recoil", rof_settings.smooth_burst)
         if sb_changed then
             save_settings()
             smooth_burst.shot_count = 0
@@ -1166,7 +1185,7 @@ re.on_draw_ui(function()
         end
         imgui.separator()
 
-        local equipped_key, pe = get_equipped_weapon_id()
+        local equipped_key, pe = get_equipped_weapon_id_cached()
         if pe then
             if equipped_key then
                 local eid_name = WEAPON_NAMES[equipped_key]
@@ -1289,11 +1308,11 @@ re.on_draw_ui(function()
         end
 
         imgui.separator()
-        if imgui.button("Capture Defaults") then
-            local defaults = capture_defaults()
-            local n = 0; for _ in pairs(defaults) do n = n + 1 end
-            ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
-        end
+        -- if imgui.button("Capture Defaults") then
+        --   local defaults = capture_defaults()
+        --   local n = 0; for _ in pairs(defaults) do n = n + 1 end
+        --   ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
+        -- end
         imgui.same_line()
         if imgui.button("Reset Current Weapon") then
             local key = dropdown_items[selected_index]
@@ -1434,9 +1453,9 @@ local sv_typedef = sdk.find_type_definition("via.SceneView")
 re.on_frame(function()
     if not show_fire_mode_overlay then return end
 
-    local eid_str, pe = get_equipped_weapon_id()
+    local eid_str, pe = get_equipped_weapon_id_cached()
     if not pe or not eid_str then return end
-    if not WEAPON_NAMES[eid_str] then return end -- Only show overlay for known weapons
+    if not WEAPON_NAMES[eid_str] then return end
 
     local current = nil
     pcall(function() current = pe:get_field("_EquipShotType") end)
@@ -1477,7 +1496,7 @@ re.on_frame(function()
     local win_h = item_h + 20
 
     local pos_x = size.w - win_w - 130
-    local pos_y = size.h - win_h - 50
+    local pos_y = size.h - win_h - 20
 
     imgui.set_next_window_pos({pos_x, pos_y}, 3, {0, 0})
     imgui.set_next_window_size({win_w, win_h}, 3)
