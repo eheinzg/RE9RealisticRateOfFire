@@ -1118,6 +1118,9 @@ re.on_draw_ui(function()
 
         local acs_changed = false
         acs_changed, ui_state.enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake", ui_state.enable_aim_camera_shake)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Toggle the camera shake effect when aiming down sights for all weapons")
+        end
         if acs_changed then
             apply_all_now()
             rof_settings.enable_aim_camera_shake = ui_state.enable_aim_camera_shake
@@ -1143,6 +1146,9 @@ re.on_draw_ui(function()
 
         local sf_changed
         sf_changed, rof_settings.disable_select_fire = imgui.checkbox("Disable Select Fire", rof_settings.disable_select_fire)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Prevent cycling fire modes with the hotkey")
+        end
         if sf_changed then
             save_settings()
             ui_state.status = "Select fire " .. (rof_settings.disable_select_fire and "disabled" or "enabled")
@@ -1150,6 +1156,9 @@ re.on_draw_ui(function()
 
         local ssa_changed
         ssa_changed, rof_settings.smooth_semi_auto = imgui.checkbox("Reduced Semi-Auto Recoil", rof_settings.smooth_semi_auto)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Limits semi-auto weapons to one shot per trigger pull, reducing recoil buildup")
+        end
         if ssa_changed then
             save_settings()
             smooth_semi.has_fired = false
@@ -1168,6 +1177,9 @@ re.on_draw_ui(function()
 
         local sb_changed
         sb_changed, rof_settings.smooth_burst = imgui.checkbox("Reduced Burst Recoil", rof_settings.smooth_burst)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Limits burst-fire weapons to the set burst count per trigger pull, reducing recoil buildup")
+        end
         if sb_changed then
             save_settings()
             smooth_burst.shot_count = 0
@@ -1271,6 +1283,9 @@ re.on_draw_ui(function()
             if edit.allow_burst == nil then edit.allow_burst = true end
 
             imgui.text_colored("Fire Modes:", 0xFFFFFF00)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Select which fire modes are available when cycling with the hotkey")
+            end
             local sc; sc, edit.allow_semi = imgui.checkbox("Semi##allow", edit.allow_semi)
             imgui.same_line()
             local fc; fc, edit.allow_full = imgui.checkbox("Full-Auto##allow", edit.allow_full)
@@ -1421,18 +1436,24 @@ re.on_draw_ui(function()
             imgui.separator()
             local ov_changed
             ov_changed, show_fire_mode_overlay = imgui.checkbox("Show Fire Mode Overlay", show_fire_mode_overlay)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Show the current fire mode indicator on screen when switching modes")
+            end
             if ov_changed then
                 rof_settings.show_fire_mode_overlay = show_fire_mode_overlay
                 save_settings()
             end
-            local lim_changed
-            lim_changed, fire_mode_limit_semi_full = imgui.checkbox("Limit to Semi/Full-Auto only", fire_mode_limit_semi_full)
-            if lim_changed then
-                rof_settings.fire_mode_limit_semi_full = fire_mode_limit_semi_full
-                save_settings()
-            end
+            --local lim_changed
+            --lim_changed, fire_mode_limit_semi_full = imgui.checkbox("Limit to Semi/Full-Auto only", fire_mode_limit_semi_full)
+            --if lim_changed then
+            --    rof_settings.fire_mode_limit_semi_full = fire_mode_limit_semi_full
+            --    save_settings()
+            --end
             local rect_changed
             rect_changed, rof_settings.overlay_use_rects = imgui.checkbox("Use Rectangles for Overlay", rof_settings.overlay_use_rects)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Use rectangles instead of circles for the fire mode overlay dots")
+            end
             if rect_changed then
                 save_settings()
             end

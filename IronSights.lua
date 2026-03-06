@@ -430,7 +430,7 @@ re.on_draw_ui(function()
         if equipped_id then
             local char_label = cached_character and (" [" .. cached_character:sub(1,1):upper() .. cached_character:sub(2) .. "]") or ""
             local eid_name = WEAPON_NAMES[equipped_id] or equipped_id
-            imgui.text_colored("Equipped: " .. eid_name .. char_label, 0xFFFFFF00)
+            imgui.text_colored("Equipped: " .. eid_name, 0xFFFFFF00)
 
             if equipped_id ~= last_equipped_id then
                 for i, key in ipairs(dropdown_items) do
