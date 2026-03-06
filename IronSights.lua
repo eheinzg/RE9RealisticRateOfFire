@@ -324,7 +324,7 @@ local is_hk_default_settings = {
     use_pad_modifier = true,
     hotkeys = {
         ["SFPS Modifier"] = "R Mouse",
-        ["Standard FPS Toggle"] = "N",
+        ["Standard FPS Toggle"] = "EX0",
         ["Pad SFPS Modifier"] = "LT (L2)",
         ["Pad Standard FPS Toggle"] = "",
     }
@@ -509,7 +509,7 @@ re.on_draw_ui(function()
         local sfps_changed
         sfps_changed, standard_fps_mode = imgui.checkbox("Standard FPS Mode", standard_fps_mode)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Press N or set hotkey at bottom of menu to toggle. (does not overwrite per-weapon settings)")
+            imgui.set_tooltip("Press side mouse button or set hotkey at bottom of menu to toggle. Gamepad must be set. (does not overwrite per-weapon settings)")
         end
         if sfps_changed then
             prefs.standard_fps_mode = standard_fps_mode
