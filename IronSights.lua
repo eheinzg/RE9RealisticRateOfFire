@@ -424,7 +424,7 @@ re.on_pre_application_entry("LockScene", function()
 end)
 
 re.on_draw_ui(function()
-    if imgui.tree_node("Ironsights") then
+    if imgui.tree_node("Iron Sights") then
 
         local equipped_id = cached_weapon_id
         if equipped_id then

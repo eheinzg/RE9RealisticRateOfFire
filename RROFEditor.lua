@@ -19,6 +19,7 @@ local rof_settings_defaults = {
     show_fire_mode_overlay = true,
     fire_mode_limit_semi_full = false,
     overlay_use_rects = false,
+    overlay_style = 1,
 }
 local rof_settings = {}
 do
@@ -36,6 +37,18 @@ end
 local function save_settings()
     json.dump_file(SETTINGS_PATH, rof_settings)
 end
+
+if rof_settings.overlay_style == nil or rof_settings.overlay_style == 1 then
+    if not rof_settings.show_fire_mode_overlay then
+        rof_settings.overlay_style = 0
+    elseif rof_settings.overlay_use_rects then
+        rof_settings.overlay_style = 2
+    else
+        rof_settings.overlay_style = 1
+    end
+end
+
+local OVERLAY_STYLES = { "None", "Circles", "Rectangles" }
 
 local disable_regrip = true
 
@@ -1046,7 +1059,7 @@ if sm_type then
 end
 
 re.on_draw_ui(function()
-    if imgui.tree_node("ROF Editor") then
+    if imgui.tree_node("Realistic Rate of Fire Editor") then
         local changed
 
         if #profile_state.names > 0 then
@@ -1119,7 +1132,7 @@ re.on_draw_ui(function()
         local acs_changed = false
         acs_changed, ui_state.enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake", ui_state.enable_aim_camera_shake)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Toggle the camera shake effect when aiming down sights for all weapons")
+            imgui.set_tooltip("Toggle the camera shake effect when aiming")
         end
         if acs_changed then
             apply_all_now()
@@ -1157,7 +1170,7 @@ re.on_draw_ui(function()
         local ssa_changed
         ssa_changed, rof_settings.smooth_semi_auto = imgui.checkbox("Reduced Semi-Auto Recoil", rof_settings.smooth_semi_auto)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Limits semi-auto weapons to one shot per trigger pull, reducing recoil buildup")
+            imgui.set_tooltip("Reduces semi-auto recoil and improves animation")
         end
         if ssa_changed then
             save_settings()
@@ -1178,7 +1191,7 @@ re.on_draw_ui(function()
         local sb_changed
         sb_changed, rof_settings.smooth_burst = imgui.checkbox("Reduced Burst Recoil", rof_settings.smooth_burst)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Limits burst-fire weapons to the set burst count per trigger pull, reducing recoil buildup")
+            imgui.set_tooltip("Reduces burst-fire recoil and improve animation")
         end
         if sb_changed then
             save_settings()
@@ -1400,6 +1413,21 @@ re.on_draw_ui(function()
             imgui.text_colored(ui_state.status, color)
         end
 
+        imgui.text_colored("Fire Mode Overlay:", 0xFFFFFF00)
+        local style_changed
+        local style_idx = (rof_settings.overlay_style or 1) + 1
+        style_changed, style_idx = imgui.combo("Style", style_idx, OVERLAY_STYLES)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Choose the fire mode overlay style shown when switching modes")
+        end
+        if style_changed then
+            rof_settings.overlay_style = style_idx - 1
+            show_fire_mode_overlay = rof_settings.overlay_style > 0
+            rof_settings.show_fire_mode_overlay = show_fire_mode_overlay
+            rof_settings.overlay_use_rects = rof_settings.overlay_style == 2
+            save_settings()
+        end
+
         if imgui.tree_node("Hotkeys") then
             local changed = false
             local wc = false
@@ -1431,31 +1459,6 @@ re.on_draw_ui(function()
             if changed or wc then
                 hk.update_hotkey_table(rof_hk_settings.hotkeys)
                 json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
-            end
-
-            imgui.separator()
-            local ov_changed
-            ov_changed, show_fire_mode_overlay = imgui.checkbox("Show Fire Mode Overlay", show_fire_mode_overlay)
-            if imgui.is_item_hovered() then
-                imgui.set_tooltip("Show the current fire mode indicator on screen when switching modes")
-            end
-            if ov_changed then
-                rof_settings.show_fire_mode_overlay = show_fire_mode_overlay
-                save_settings()
-            end
-            --local lim_changed
-            --lim_changed, fire_mode_limit_semi_full = imgui.checkbox("Limit to Semi/Full-Auto only", fire_mode_limit_semi_full)
-            --if lim_changed then
-            --    rof_settings.fire_mode_limit_semi_full = fire_mode_limit_semi_full
-            --    save_settings()
-            --end
-            local rect_changed
-            rect_changed, rof_settings.overlay_use_rects = imgui.checkbox("Use Rectangles for Overlay", rof_settings.overlay_use_rects)
-            if imgui.is_item_hovered() then
-                imgui.set_tooltip("Use rectangles instead of circles for the fire mode overlay dots")
-            end
-            if rect_changed then
-                save_settings()
             end
             imgui.tree_pop()
         end
