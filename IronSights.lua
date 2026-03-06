@@ -57,12 +57,16 @@ local function save_offsets()
 end
 load_offsets()
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, transition_duration = 1.0 }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
         if saved.hide_reticle ~= nil then prefs.hide_reticle = saved.hide_reticle end
         if saved.bullet_from_muzzle ~= nil then prefs.bullet_from_muzzle = saved.bullet_from_muzzle end
+        if saved.transition_in ~= nil then prefs.transition_in = saved.transition_in end
+        if saved.transition_out ~= nil then prefs.transition_out = saved.transition_out end
+        if saved.transition_swap ~= nil then prefs.transition_swap = saved.transition_swap end
+        if saved.standard_fps_mode ~= nil then prefs.standard_fps_mode = saved.standard_fps_mode end
     end
 end
 local function save_prefs()
@@ -70,6 +74,7 @@ local function save_prefs()
 end
 
 local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
+local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
 
 -- UI state for the currently selected weapon's sliders
 local ui_offset = { x = 0.0, y = 0.0, z = 0.0 }
@@ -87,18 +92,24 @@ local function populate_ui(key)
     end
 end
 
+local TRANSITION_IN = prefs.transition_in
+local TRANSITION_OUT = prefs.transition_out
+local TRANSITION_SWAP = prefs.transition_swap
+
 local transition = {
     from_x = 0.0, from_y = 0.0, from_z = 0.0,
     to_x = 0.0, to_y = 0.0, to_z = 0.0,
     cur_x = 0.0, cur_y = 0.0, cur_z = 0.0,
     t = 1.0,
-    duration = 1.0,
+    duration = TRANSITION_IN,
     last_weapon_id = nil,
     last_time = os.clock(),
 }
 
-local function transition_set_target(tx, ty, tz)
+local function transition_set_target(tx, ty, tz, override_duration)
     if tx == transition.to_x and ty == transition.to_y and tz == transition.to_z then return end
+    local was_zero = (transition.to_x == 0 and transition.to_y == 0 and transition.to_z == 0)
+    local is_zero = (tx == 0 and ty == 0 and tz == 0)
     transition.from_x = transition.cur_x
     transition.from_y = transition.cur_y
     transition.from_z = transition.cur_z
@@ -106,6 +117,15 @@ local function transition_set_target(tx, ty, tz)
     transition.to_y = ty
     transition.to_z = tz
     transition.t = 0.0
+    if override_duration then
+        transition.duration = override_duration
+    elseif is_zero then
+        transition.duration = TRANSITION_OUT
+    elseif was_zero then
+        transition.duration = TRANSITION_IN
+    else
+        transition.duration = TRANSITION_SWAP
+    end
 end
 
 local function smoothstep(t)
@@ -292,9 +312,46 @@ do
     end
 end
 
+local STANDARD_FPS_X = -0.09
+local TRANSITION_SFPS = 0.1
+local standard_fps_mode = prefs.standard_fps_mode
+local sfps_toggled_this_frame = false
+
+local hk = require("Hotkeys/Hotkeys")
+local IS_HK_PATH = "IronSights/hotkeys.json"
+local is_hk_default_settings = {
+    use_modifier = false,
+    use_pad_modifier = true,
+    hotkeys = {
+        ["SFPS Modifier"] = "R Mouse",
+        ["Standard FPS Toggle"] = "N",
+        ["Pad SFPS Modifier"] = "LT (L2)",
+        ["Pad Standard FPS Toggle"] = "Y (Triangle)",
+    }
+}
+local is_hk_settings = hk.recurse_def_settings(json.load_file(IS_HK_PATH) or {}, is_hk_default_settings)
+hk.setup_hotkeys(is_hk_settings.hotkeys)
+
+local sfps_toggle_was_down = false
+
+re.on_application_entry("UpdateBehavior", function()
+    local kb = (not is_hk_settings.use_modifier or hk.check_hotkey("SFPS Modifier", true)) and hk.check_hotkey("Standard FPS Toggle", true)
+    local pad = (not is_hk_settings.use_pad_modifier or hk.check_hotkey("Pad SFPS Modifier", true)) and hk.check_hotkey("Pad Standard FPS Toggle", true)
+    local is_down = kb or pad
+    sfps_toggled_this_frame = false
+    if is_down and not sfps_toggle_was_down then
+        standard_fps_mode = not standard_fps_mode
+        prefs.standard_fps_mode = standard_fps_mode
+        save_prefs()
+        sfps_toggled_this_frame = true
+    end
+    sfps_toggle_was_down = is_down or false
+end)
+
 local camera_offset_applied = false
 local cached_weapon_id = nil
 local cached_character = nil
+local cached_is_holding = false
 
 local function get_player_context()
     local cm = sdk.get_managed_singleton("app.CharacterManager")
@@ -360,10 +417,26 @@ re.on_pre_application_entry("LockScene", function()
 
         local raw_id = get_equipped_weapon_id_from_ctx(ctx)
         cached_weapon_id = get_offset_key(raw_id, cached_character)
+
+        cached_is_holding = false
+        if TYPE_CameraPosSetting then
+            local go = nil
+            pcall(function() go = ctx:call("get_GameObject") end)
+            if go then
+                local cps = nil
+                pcall(function() cps = go:call("getComponent(System.Type)", TYPE_CameraPosSetting) end)
+                if cps then
+                    local hold = nil
+                    pcall(function() hold = cps:get_field("_IsHold") end)
+                    cached_is_holding = hold == true
+                end
+            end
+        end
     else
         cached_view_mode = -1
         cached_weapon_id = nil
         cached_character = nil
+        cached_is_holding = false
     end
 
     local cam = sdk.get_primary_camera()
@@ -372,12 +445,19 @@ re.on_pre_application_entry("LockScene", function()
         return
     end
 
-    local o = cached_weapon_id and weapon_offsets[cached_weapon_id] or nil
+    local is_active = cached_view_mode == 1 and cached_is_holding
+    local o = (is_active and cached_weapon_id) and weapon_offsets[cached_weapon_id] or nil
     local tx = o and o.x or 0
     local ty = o and o.y or 0
     local tz = o and o.z or 0
 
-    transition_set_target(tx, ty, tz)
+    if standard_fps_mode and is_active then
+        tx = tx + STANDARD_FPS_X
+        ty = 0
+        tz = 0
+    end
+
+    transition_set_target(tx, ty, tz, sfps_toggled_this_frame and TRANSITION_SFPS or nil)
     transition_update()
 
     local ox = transition.cur_x
@@ -425,6 +505,17 @@ end)
 
 re.on_draw_ui(function()
     if imgui.tree_node("Iron Sights") then
+
+        local sfps_changed
+        sfps_changed, standard_fps_mode = imgui.checkbox("Standard FPS Mode", standard_fps_mode)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Adds a -0.09 left/right offset to all weapons while aiming (does not overwrite per-weapon settings)")
+        end
+        if sfps_changed then
+            prefs.standard_fps_mode = standard_fps_mode
+            save_prefs()
+        end
+        imgui.separator()
 
         local equipped_id = cached_weapon_id
         if equipped_id then
@@ -538,13 +629,66 @@ re.on_draw_ui(function()
             end
         end
 
-        -- local dur_changed
-        -- dur_changed, transition.duration = imgui.drag_float("Transition (sec)", transition.duration, 0.01, 0.0, 2.0, "%.2f")
-        -- if transition.duration < 0 then transition.duration = 0 end
-        -- if dur_changed then
-        --     prefs.transition_duration = transition.duration
-        --     save_prefs()
-        -- end
+        imgui.spacing()
+        imgui.text_colored("Transitions:", 0xFFFFFF00)
+        local tin_changed
+        tin_changed, TRANSITION_IN = imgui.drag_float("Aim In (sec)", TRANSITION_IN, 0.01, 0.0, 5.0, "%.2f")
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("How fast the offset applies when you start aiming")
+        end
+        if tin_changed then prefs.transition_in = TRANSITION_IN; save_prefs() end
+
+        local tout_changed
+        tout_changed, TRANSITION_OUT = imgui.drag_float("Aim Out (sec)", TRANSITION_OUT, 0.01, 0.0, 5.0, "%.2f")
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("How fast the offset resets when you stop aiming")
+        end
+        if tout_changed then prefs.transition_out = TRANSITION_OUT; save_prefs() end
+
+        local tswap_changed
+        tswap_changed, TRANSITION_SWAP = imgui.drag_float("Weapon Swap (sec)", TRANSITION_SWAP, 0.01, 0.0, 5.0, "%.2f")
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("How fast the offset blends when switching weapons while aiming")
+        end
+        if tswap_changed then prefs.transition_swap = TRANSITION_SWAP; save_prefs() end
+
+        if imgui.button("Reset To Default") then
+            TRANSITION_IN = 0.15
+            TRANSITION_OUT = 1.0
+            TRANSITION_SWAP = 0.5
+            prefs.transition_in = TRANSITION_IN
+            prefs.transition_out = TRANSITION_OUT
+            prefs.transition_swap = TRANSITION_SWAP
+            save_prefs()
+        end
+
+        imgui.spacing()
+        imgui.text_colored("Hotkeys:", 0xFFFFFF00)
+        local hk_changed = false
+        local wc = false
+
+        imgui.text_colored(" Keyboard and Mouse:", 0xFFFFFFAA)
+        local mc; mc, is_hk_settings.use_modifier = imgui.checkbox("Use Modifier##is_kb_mod", is_hk_settings.use_modifier); wc = wc or mc
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Require holding this button while pressing toggle")
+        end
+        imgui.same_line()
+        hk_changed = hk.hotkey_setter("SFPS Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Standard FPS Toggle", is_hk_settings.use_modifier and "SFPS Modifier") or hk_changed
+
+        imgui.text_colored(" Gamepad:", 0xFFFFFFAA)
+        local pc; pc, is_hk_settings.use_pad_modifier = imgui.checkbox("Use Modifier##is_pad_mod", is_hk_settings.use_pad_modifier); wc = wc or pc
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Require holding this button while pressing toggle")
+        end
+        imgui.same_line()
+        hk_changed = hk.hotkey_setter("Pad SFPS Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Pad Standard FPS Toggle", is_hk_settings.use_pad_modifier and "Pad SFPS Modifier") or hk_changed
+
+        if hk_changed or wc then
+            hk.update_hotkey_table(is_hk_settings.hotkeys)
+            json.dump_file(IS_HK_PATH, is_hk_settings)
+        end
 
         imgui.tree_pop()
     end
