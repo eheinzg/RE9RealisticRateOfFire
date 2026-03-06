@@ -313,7 +313,7 @@ do
 end
 
 local STANDARD_FPS_X = -0.09
-local TRANSITION_SFPS = 0.1
+local TRANSITION_SFPS = 0.2
 local standard_fps_mode = prefs.standard_fps_mode
 local sfps_toggled_this_frame = false
 
@@ -326,7 +326,7 @@ local is_hk_default_settings = {
         ["SFPS Modifier"] = "R Mouse",
         ["Standard FPS Toggle"] = "N",
         ["Pad SFPS Modifier"] = "LT (L2)",
-        ["Pad Standard FPS Toggle"] = "Y (Triangle)",
+        ["Pad Standard FPS Toggle"] = "",
     }
 }
 local is_hk_settings = hk.recurse_def_settings(json.load_file(IS_HK_PATH) or {}, is_hk_default_settings)
@@ -509,7 +509,7 @@ re.on_draw_ui(function()
         local sfps_changed
         sfps_changed, standard_fps_mode = imgui.checkbox("Standard FPS Mode", standard_fps_mode)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Adds a -0.09 left/right offset to all weapons while aiming (does not overwrite per-weapon settings)")
+            imgui.set_tooltip("Press N or set hotkey at bottom of menu to toggle. (does not overwrite per-weapon settings)")
         end
         if sfps_changed then
             prefs.standard_fps_mode = standard_fps_mode
@@ -686,6 +686,13 @@ re.on_draw_ui(function()
         hk_changed = hk.hotkey_setter("Pad Standard FPS Toggle", is_hk_settings.use_pad_modifier and "Pad SFPS Modifier") or hk_changed
 
         if hk_changed or wc then
+            hk.update_hotkey_table(is_hk_settings.hotkeys)
+            json.dump_file(IS_HK_PATH, is_hk_settings)
+        end
+
+        if imgui.button("Reset Hotkeys to Defaults") then
+            is_hk_settings = hk.recurse_def_settings({}, is_hk_default_settings)
+            hk.reset_from_defaults_tbl(is_hk_default_settings.hotkeys)
             hk.update_hotkey_table(is_hk_settings.hotkeys)
             json.dump_file(IS_HK_PATH, is_hk_settings)
         end
