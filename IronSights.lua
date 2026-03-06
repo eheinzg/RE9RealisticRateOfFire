@@ -57,17 +57,138 @@ local function save_offsets()
 end
 load_offsets()
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, transition_duration = 0.25 }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, transition_duration = 0.25, enable_aim_camera_shake = true }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
         if saved.hide_reticle ~= nil then prefs.hide_reticle = saved.hide_reticle end
         if saved.bullet_from_muzzle ~= nil then prefs.bullet_from_muzzle = saved.bullet_from_muzzle end
         if saved.transition_duration ~= nil then prefs.transition_duration = saved.transition_duration end
+        if saved.enable_aim_camera_shake ~= nil then prefs.enable_aim_camera_shake = saved.enable_aim_camera_shake end
     end
 end
 local function save_prefs()
     json.dump_file(PREFS_PATH, prefs)
+end
+
+local enable_aim_camera_shake = prefs.enable_aim_camera_shake
+
+local function try_field(obj, name)
+    local r; pcall(function() r = obj:get_field(name) end); return r
+end
+
+local function set_field_safe(obj, name, value)
+    if obj == nil or name == nil or value == nil then return false end
+    return pcall(function() obj:set_field(name, value) end)
+end
+
+local function try_call(obj, method, ...)
+    local ok, r = pcall(function(...) return obj:call(method, ...) end, ...)
+    if ok then return r end
+end
+
+local function get_scene()
+    local sm = sdk.get_native_singleton("via.SceneManager")
+    local sm_type = sm and sdk.find_type_definition("via.SceneManager")
+    return sm_type and sdk.call_native_func(sm, sm_type, "get_CurrentScene")
+end
+
+local function find_all_catalogs(scene)
+    local results = {}
+    if not scene then return results end
+    local seen = {}
+    local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
+    if obj then
+        seen[obj:get_address()] = true
+        results[#results + 1] = obj
+    end
+    local reg_type = sdk.typeof("app.WeaponCatalogRegister")
+    if reg_type then
+        local all_components
+        pcall(function() all_components = scene:call("findComponents(System.Type)", reg_type) end)
+        if all_components then
+            local n = 0; pcall(function() n = all_components:call("get_Count") end)
+            for i = 0, n - 1 do
+                local comp; pcall(function() comp = all_components:call("get_Item", i) end)
+                if comp then
+                    local go; pcall(function() go = comp:call("get_GameObject") end)
+                    if go then
+                        local addr = go:get_address()
+                        if not seen[addr] then
+                            seen[addr] = true
+                            results[#results + 1] = go
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return results
+end
+
+local function get_register(catalog)
+    if not catalog then return nil end
+    for _, tn in ipairs({ "app.WeaponCatalogRegister", "chainsaw.WeaponCatalogRegister" }) do
+        local t = sdk.typeof(tn)
+        if t then
+            local r = catalog:call("getComponent(System.Type)", t)
+            if r then return r end
+        end
+    end
+end
+
+local function get_data_table(register)
+    if not register then return nil end
+    local ud = try_field(register, "_WeaponEquipParamCatalogUserData")
+        or try_call(register, "get_WeaponEquipParamCatalogUserData")
+        or try_field(register, "_PlayerWeaponParameterUserData")
+        or try_call(register, "get_PlayerWeaponParameterUserData")
+        or try_field(register, "_WeaponCatalogUserData")
+    if not ud then return nil end
+    local dt = try_field(ud, "_DataTable") or try_field(ud, "_WeaponEquipParams") or try_call(ud, "get_DataTable")
+    if dt then return dt end
+    local cd = try_field(ud, "_CatalogData")
+    if cd then return try_field(cd, "_DataTable") or try_field(cd, "_WeaponEquipParams") or try_call(cd, "get_DataTable") end
+end
+
+local function apply_camera_shake_global(enabled)
+    local scene = get_scene()
+    if not scene then return end
+    local catalogs = find_all_catalogs(scene)
+    for _, cat in ipairs(catalogs) do
+        local reg = get_register(cat)
+        local dt = get_data_table(reg)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                local wd; pcall(function() wd = dt:call("get_Item", i) end)
+                if wd then
+                    local wp = try_field(wd, "WeaponParameter") or try_field(wd, "_WeaponParameter")
+                    if wp then
+                        local acsp = try_field(wp, "_AimCameraShakeParam") or try_field(wp, "AimCameraShakeParam")
+                        if acsp then
+                            set_field_safe(acsp, "_EnableAimCameraShake", enabled)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local acs_needs_apply = true
+
+do
+    local sm_type = sdk.find_type_definition("via.SceneManager")
+    if sm_type then
+        local m = sm_type:get_method("begin_change_sceneByString")
+        if m then
+            sdk.hook(m,
+                function() return sdk.PreHookResult.CALL_ORIGINAL end,
+                function(retval) acs_needs_apply = true; return retval end
+            )
+        end
+    end
 end
 
 local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
@@ -349,6 +470,11 @@ local function quat_rotate_vec3(q, v)
 end
 
 re.on_pre_application_entry("LockScene", function()
+    if acs_needs_apply then
+        apply_camera_shake_global(enable_aim_camera_shake)
+        acs_needs_apply = false
+    end
+
     local ctx = get_player_context()
     if ctx then
         local view_mode = nil
@@ -544,6 +670,16 @@ re.on_draw_ui(function()
         if transition.duration < 0 then transition.duration = 0 end
         if dur_changed then
             prefs.transition_duration = transition.duration
+            save_prefs()
+        end
+
+        imgui.separator()
+        local acs_changed
+        acs_changed, enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake (Global)", enable_aim_camera_shake)
+        if acs_changed then
+            prefs.enable_aim_camera_shake = enable_aim_camera_shake
+            apply_camera_shake_global(enable_aim_camera_shake)
+            acs_needs_apply = false
             save_prefs()
         end
 
