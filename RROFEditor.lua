@@ -606,6 +606,7 @@ local smooth_semi = {
     active = false,
     display_mode = nil,
     last_pe = nil,
+    last_weapon_id = nil,
 }
 
 local function smooth_semi_set_dss(pe, value)
@@ -633,6 +634,7 @@ local smooth_burst = {
     active = false,
     display_mode = nil,
     last_pe = nil,
+    last_weapon_id = nil,
 }
 
 local function smooth_get_display_mode()
@@ -768,24 +770,34 @@ re.on_application_entry("UpdateHID", function()
     if not rof_settings.smooth_semi_auto and not rof_settings.smooth_burst then return end
     if not pe then
         smooth_semi.last_pe = nil
+        smooth_semi.last_weapon_id = nil
         smooth_burst.last_pe = nil
+        smooth_burst.last_weapon_id = nil
         return
     end
 
-    local pe_changed_semi = (pe ~= smooth_semi.last_pe)
-    smooth_semi.last_pe = pe
-    local pe_changed_burst = (pe ~= smooth_burst.last_pe)
-    smooth_burst.last_pe = pe
+    local cur_weapon_id = get_equipped_weapon_id()
 
-    if pe_changed_semi and smooth_semi.active then
+    local pe_changed = (pe ~= smooth_semi.last_pe)
+    local weapon_changed = (cur_weapon_id ~= smooth_semi.last_weapon_id)
+    smooth_semi.last_pe = pe
+    smooth_semi.last_weapon_id = cur_weapon_id
+    smooth_burst.last_pe = pe
+    smooth_burst.last_weapon_id = cur_weapon_id
+
+    if (pe_changed or weapon_changed) and smooth_semi.active then
         smooth_semi.has_fired = false
         smooth_semi.shoot_held = false
         smooth_semi.active = false
+        smooth_semi.display_mode = nil
+        smooth_semi_set_dss(pe, false)
     end
-    if pe_changed_burst and smooth_burst.active then
+    if (pe_changed or weapon_changed) and smooth_burst.active then
         smooth_burst.shot_count = 0
         smooth_burst.shoot_held = false
         smooth_burst.active = false
+        smooth_burst.display_mode = nil
+        smooth_semi_set_dss(pe, false)
     end
 
     local shot_type = nil
