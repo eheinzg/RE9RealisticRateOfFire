@@ -52,12 +52,11 @@ local function save_offsets()
 end
 load_offsets()
 
-local prefs = { hide_reticle = false, hide_reticle_fps_only = false, bullet_from_muzzle = false, transition_duration = 0.25 }
+local prefs = { hide_reticle = false, bullet_from_muzzle = false, transition_duration = 0.25 }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
         if saved.hide_reticle ~= nil then prefs.hide_reticle = saved.hide_reticle end
-        if saved.hide_reticle_fps_only ~= nil then prefs.hide_reticle_fps_only = saved.hide_reticle_fps_only end
         if saved.bullet_from_muzzle ~= nil then prefs.bullet_from_muzzle = saved.bullet_from_muzzle end
         if saved.transition_duration ~= nil then prefs.transition_duration = saved.transition_duration end
     end
@@ -136,7 +135,6 @@ end
 
 -- Reticle hiding
 local hide_reticle = prefs.hide_reticle
-local hide_reticle_fps_only = prefs.hide_reticle_fps_only
 local cached_view_mode = -1
 
 local reticle_names = {
@@ -148,7 +146,7 @@ end
 
 re.on_pre_gui_draw_element(function(element, context)
     if not hide_reticle then return true end
-    if hide_reticle_fps_only and cached_view_mode ~= 1 then return true end
+    if cached_view_mode ~= 1 then return true end
     local game_object = element:call("get_GameObject")
     if game_object == nil then return true end
     local name = game_object:call("get_Name")
@@ -508,18 +506,16 @@ re.on_draw_ui(function()
 
         imgui.separator()
         local ret_changed
-        ret_changed, hide_reticle = imgui.checkbox("Hide Reticle", hide_reticle)
+        ret_changed, hide_reticle = imgui.checkbox("Hide Reticle in First Person", hide_reticle)
         if ret_changed then
             prefs.hide_reticle = hide_reticle
+            if not hide_reticle and bullet_from_muzzle then
+                bullet_from_muzzle = false
+                prefs.bullet_from_muzzle = false
+            end
             save_prefs()
         end
         if hide_reticle then
-            local fps_changed
-            fps_changed, hide_reticle_fps_only = imgui.checkbox("FPS Only##reticle_fps", hide_reticle_fps_only)
-            if fps_changed then
-                prefs.hide_reticle_fps_only = hide_reticle_fps_only
-                save_prefs()
-            end
             local muzzle_changed
             muzzle_changed, bullet_from_muzzle = imgui.checkbox("Spawn Bullet From Muzzle", bullet_from_muzzle)
             if muzzle_changed then
