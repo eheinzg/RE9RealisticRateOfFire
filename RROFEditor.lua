@@ -14,6 +14,7 @@ local rof_settings_defaults = {
     disable_regrip = true,
     disable_select_fire = false,
     smooth_semi_auto = false,
+    smooth_burst = false,
     enable_aim_camera_shake = true,
     show_fire_mode_overlay = true,
     fire_mode_limit_semi_full = false,
@@ -620,8 +621,23 @@ local function smooth_semi_set_dss(pe, value)
     end
 end
 
-local function smooth_semi_get_display_mode()
+-- ============================================================
+-- Smooth Burst
+-- Allows BurstNum shots per trigger pull on full-auto weapons.
+-- After BurstNum execFire calls, sets DisableShootState on the
+-- weapon object to block further shots. Resets on release.
+-- ============================================================
+local smooth_burst = {
+    shot_count = 0,
+    shoot_held = false,
+    active = false,
+    display_mode = nil,
+    last_pe = nil,
+}
+
+local function smooth_get_display_mode()
     if smooth_semi.active then return 0 end
+    if smooth_burst.active then return 2 end
     return nil
 end
 
@@ -635,12 +651,18 @@ local function cycle_fire_mode()
     local current = nil
     pcall(function() current = pe:get_field("_EquipShotType") end)
     if current == nil then return end
-    current = smooth_semi_get_display_mode() or tonumber(current) or 0
+    current = smooth_get_display_mode() or tonumber(current) or 0
 
     if smooth_semi.active then
         smooth_semi.active = false
         smooth_semi.display_mode = nil
         smooth_semi.has_fired = false
+        smooth_semi_set_dss(pe, false)
+    end
+    if smooth_burst.active then
+        smooth_burst.active = false
+        smooth_burst.display_mode = nil
+        smooth_burst.shot_count = 0
         smooth_semi_set_dss(pe, false)
     end
 
@@ -704,66 +726,134 @@ re.on_application_entry("UpdateBehavior", function()
     toggle_was_down = is_down or false
 end)
 
+local function get_burst_num_for_equipped()
+    local eid_str = get_equipped_weapon_id()
+    if not eid_str then return 3 end
+    local edit = rof_edits[eid_str]
+    if edit and edit.BurstNum then return edit.BurstNum end
+    local def = rof_defaults[eid_str]
+    if def and def.BurstNum then return def.BurstNum end
+    return 3
+end
+
 re.on_application_entry("UpdateHID", function()
+    local pe = get_player_equipment()
+
+    -- Smooth Semi-Auto cleanup when disabled
     if not rof_settings.smooth_semi_auto then
         if smooth_semi.active then
             smooth_semi.active = false
             smooth_semi.has_fired = false
             smooth_semi.display_mode = nil
-            local pe = get_player_equipment()
             if pe then
                 pcall(function() pe:set_field("_EquipShotType", 0) end)
                 smooth_semi_set_dss(pe, false)
             end
         end
-        return
     end
 
-    local pe = get_player_equipment()
+    -- Smooth Burst cleanup when disabled
+    if not rof_settings.smooth_burst then
+        if smooth_burst.active then
+            smooth_burst.active = false
+            smooth_burst.shot_count = 0
+            smooth_burst.display_mode = nil
+            if pe then
+                pcall(function() pe:set_field("_EquipShotType", 2) end)
+                smooth_semi_set_dss(pe, false)
+            end
+        end
+    end
+
+    if not rof_settings.smooth_semi_auto and not rof_settings.smooth_burst then return end
     if not pe then
         smooth_semi.last_pe = nil
+        smooth_burst.last_pe = nil
         return
     end
 
-    local pe_changed = (pe ~= smooth_semi.last_pe)
+    local pe_changed_semi = (pe ~= smooth_semi.last_pe)
     smooth_semi.last_pe = pe
+    local pe_changed_burst = (pe ~= smooth_burst.last_pe)
+    smooth_burst.last_pe = pe
 
-    if pe_changed and smooth_semi.active then
+    if pe_changed_semi and smooth_semi.active then
         smooth_semi.has_fired = false
         smooth_semi.shoot_held = false
         smooth_semi.active = false
+    end
+    if pe_changed_burst and smooth_burst.active then
+        smooth_burst.shot_count = 0
+        smooth_burst.shoot_held = false
+        smooth_burst.active = false
     end
 
     local shot_type = nil
     pcall(function() shot_type = pe:get_field("_EquipShotType") end)
     shot_type = tonumber(shot_type) or -1
 
-    if shot_type == 0 or smooth_semi.active then
-        if not smooth_semi.active then
-            smooth_semi.active = true
-            smooth_semi.display_mode = 0
-        end
-        pcall(function() pe:set_field("_EquipShotType", 1) end)
+    local rt_down = hk.check_pad_button("RT (R2)", true) or false
+    local lmb_down = hk.check_mouse_button("L Mouse", true) or false
+    local shoot_held = rt_down or lmb_down
 
-        local rt_down = hk.check_pad_button("RT (R2)", true) or false
-        local lmb_down = hk.check_mouse_button("L Mouse", true) or false
-        local shoot_held = rt_down or lmb_down
-        if not shoot_held and smooth_semi.shoot_held then
-            smooth_semi.has_fired = false
-            smooth_semi_set_dss(pe, false)
-        end
-        smooth_semi.shoot_held = shoot_held
+    -- Smooth Semi-Auto
+    if rof_settings.smooth_semi_auto then
+        if shot_type == 0 or smooth_semi.active then
+            if not smooth_semi.active then
+                smooth_semi.active = true
+                smooth_semi.display_mode = 0
+            end
+            pcall(function() pe:set_field("_EquipShotType", 1) end)
 
-        if shot_type ~= 0 and shot_type ~= 1 then
-            smooth_semi.active = false
-            smooth_semi.display_mode = nil
-            smooth_semi.has_fired = false
-            smooth_semi_set_dss(pe, false)
+            if not shoot_held and smooth_semi.shoot_held then
+                smooth_semi.has_fired = false
+                smooth_semi_set_dss(pe, false)
+            end
+            smooth_semi.shoot_held = shoot_held
+
+            if shot_type ~= 0 and shot_type ~= 1 then
+                smooth_semi.active = false
+                smooth_semi.display_mode = nil
+                smooth_semi.has_fired = false
+                smooth_semi_set_dss(pe, false)
+            end
+        else
+            if smooth_semi.active then
+                smooth_semi.active = false
+                smooth_semi.display_mode = nil
+                smooth_semi.has_fired = false
+            end
         end
-    else
-        smooth_semi.active = false
-        smooth_semi.display_mode = nil
-        smooth_semi.has_fired = false
+    end
+
+    -- Smooth Burst
+    if rof_settings.smooth_burst then
+        if shot_type == 2 or smooth_burst.active then
+            if not smooth_burst.active then
+                smooth_burst.active = true
+                smooth_burst.display_mode = 2
+            end
+            pcall(function() pe:set_field("_EquipShotType", 1) end)
+
+            if not shoot_held and smooth_burst.shoot_held then
+                smooth_burst.shot_count = 0
+                smooth_semi_set_dss(pe, false)
+            end
+            smooth_burst.shoot_held = shoot_held
+
+            if shot_type ~= 2 and shot_type ~= 1 then
+                smooth_burst.active = false
+                smooth_burst.display_mode = nil
+                smooth_burst.shot_count = 0
+                smooth_semi_set_dss(pe, false)
+            end
+        else
+            if smooth_burst.active then
+                smooth_burst.active = false
+                smooth_burst.display_mode = nil
+                smooth_burst.shot_count = 0
+            end
+        end
     end
 end)
 
@@ -775,10 +865,17 @@ do
             local pending_pe = nil
             sdk.hook(exec_fire,
                 function(args)
-                    if not smooth_semi.active then return end
-                    if not smooth_semi.has_fired then
-                        smooth_semi.has_fired = true
-                        pcall(function() pending_pe = sdk.to_managed_object(args[2]) end)
+                    if smooth_semi.active then
+                        if not smooth_semi.has_fired then
+                            smooth_semi.has_fired = true
+                            pcall(function() pending_pe = sdk.to_managed_object(args[2]) end)
+                        end
+                    elseif smooth_burst.active then
+                        smooth_burst.shot_count = smooth_burst.shot_count + 1
+                        local burst_num = get_burst_num_for_equipped()
+                        if smooth_burst.shot_count >= burst_num then
+                            pcall(function() pending_pe = sdk.to_managed_object(args[2]) end)
+                        end
                     end
                 end,
                 function(retval)
@@ -1037,6 +1134,24 @@ re.on_draw_ui(function()
             end
             ui_state.status = "Smooth Semi-Auto " .. (rof_settings.smooth_semi_auto and "enabled" or "disabled")
         end
+
+        local sb_changed
+        sb_changed, rof_settings.smooth_burst = imgui.checkbox("Smooth Burst", rof_settings.smooth_burst)
+        if sb_changed then
+            save_settings()
+            smooth_burst.shot_count = 0
+            smooth_burst.shoot_held = false
+            if not rof_settings.smooth_burst and smooth_burst.active then
+                smooth_burst.active = false
+                smooth_burst.display_mode = nil
+                local pe = get_player_equipment()
+                if pe then
+                    pcall(function() pe:set_field("_EquipShotType", 2) end)
+                    smooth_semi_set_dss(pe, false)
+                end
+            end
+            ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
+        end
         imgui.separator()
 
         local equipped_key, pe = get_equipped_weapon_id()
@@ -1053,7 +1168,7 @@ re.on_draw_ui(function()
                 if is_known then
                     local current_type = 0
                     pcall(function() current_type = pe:get_field("_EquipShotType") end)
-                    current_type = smooth_semi_get_display_mode() or tonumber(current_type) or 0
+                    current_type = smooth_get_display_mode() or tonumber(current_type) or 0
                     local mode_name = FIRE_MODE_NAMES[current_type] or "?"
 
                     imgui.same_line()
@@ -1314,7 +1429,7 @@ re.on_frame(function()
     local current = nil
     pcall(function() current = pe:get_field("_EquipShotType") end)
     if current == nil then return end
-    current = smooth_semi_get_display_mode() or tonumber(current) or 0
+    current = smooth_get_display_mode() or tonumber(current) or 0
 
     if last_displayed_mode ~= current then
         fire_mode_display_timer = os.clock()
