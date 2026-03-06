@@ -65,6 +65,8 @@ local function save_prefs()
     json.dump_file(PREFS_PATH, prefs)
 end
 
+local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
+
 -- UI state for the currently selected weapon's sliders
 local ui_offset = { x = 0.0, y = 0.0, z = 0.0 }
 
@@ -287,14 +289,7 @@ do
 end
 
 local camera_offset_applied = false
-local camera_debug = {
-    stage = "idle",
-    ctx_type = "?",
-    view_mode_raw = "?",
-    cam_type = "?",
-    pos_str = "?",
-    weapon_id = "?",
-}
+local cached_weapon_id = nil
 
 local function get_player_context()
     local cm = sdk.get_managed_singleton("app.CharacterManager")
@@ -304,21 +299,13 @@ local function get_player_context()
     return ctx
 end
 
-local function get_player_equipment()
-    local ctx = get_player_context()
-    if not ctx then return nil end
+local function get_equipped_weapon_id_from_ctx(ctx)
+    if not ctx or not TYPE_PlayerEquipment then return nil end
     local go = nil
     pcall(function() go = ctx:call("get_GameObject") end)
     if not go then return nil end
-    local pe_type = sdk.typeof("app.PlayerEquipment")
-    if not pe_type then return nil end
     local pe = nil
-    pcall(function() pe = go:call("getComponent(System.Type)", pe_type) end)
-    return pe
-end
-
-local function get_equipped_weapon_id()
-    local pe = get_player_equipment()
+    pcall(function() pe = go:call("getComponent(System.Type)", TYPE_PlayerEquipment) end)
     if not pe then return nil end
     local eid = nil
     pcall(function() eid = pe:get_field("<EquipWeaponID>k__BackingField") end)
@@ -347,20 +334,24 @@ local function quat_rotate_vec3(q, v)
 end
 
 re.on_pre_application_entry("LockScene", function()
-    camera_debug.stage = "start"
+    local ctx = get_player_context()
+    if ctx then
+        local view_mode = nil
+        pcall(function() view_mode = ctx:get_field("<CurrentViewMode>k__BackingField") end)
+        cached_view_mode = tonumber(view_mode) or -1
+        cached_weapon_id = get_equipped_weapon_id_from_ctx(ctx)
+    else
+        cached_view_mode = -1
+        cached_weapon_id = nil
+    end
+
     local cam = sdk.get_primary_camera()
     if not cam then
         camera_offset_applied = false
-        camera_debug.stage = "no camera"
-        camera_debug.cam_type = "nil"
         return
     end
-    camera_debug.cam_type = tostring(cam:get_type_definition():get_full_name())
 
-    local weapon_id = get_equipped_weapon_id()
-    camera_debug.weapon_id = weapon_id or "none"
-
-    local o = weapon_id and weapon_offsets[weapon_id] or nil
+    local o = cached_weapon_id and weapon_offsets[cached_weapon_id] or nil
     local tx = o and o.x or 0
     local ty = o and o.y or 0
     local tz = o and o.z or 0
@@ -375,56 +366,28 @@ re.on_pre_application_entry("LockScene", function()
     local eps = 0.00001
     if math.abs(ox) < eps and math.abs(oy) < eps and math.abs(oz) < eps then
         camera_offset_applied = false
-        camera_debug.stage = "offset zero"
         return
     end
 
-    local ctx = get_player_context()
-    if not ctx then
-        camera_offset_applied = false
-        camera_debug.stage = "no player ctx"
-        camera_debug.ctx_type = "nil"
-        return
-    end
-    camera_debug.ctx_type = tostring(ctx:get_type_definition():get_full_name())
-
-    local view_mode = nil
-    pcall(function() view_mode = ctx:get_field("<CurrentViewMode>k__BackingField") end)
-    cached_view_mode = tonumber(view_mode) or -1
-    camera_debug.view_mode_raw = tostring(view_mode)
     if cached_view_mode ~= 1 then
         camera_offset_applied = false
-        camera_debug.stage = "view_mode ~= 1 (" .. tostring(view_mode) .. ")"
         return
     end
 
     local go = nil
     pcall(function() go = cam:call("get_GameObject") end)
-    if not go then
-        camera_debug.stage = "no cam GO"
-        return
-    end
+    if not go then return end
     local xform = nil
     pcall(function() xform = go:call("get_Transform") end)
-    if not xform then
-        camera_debug.stage = "no cam xform"
-        return
-    end
+    if not xform then return end
 
     local pos = nil
     pcall(function() pos = xform:call("get_Position") end)
-    if not pos then
-        camera_debug.stage = "no pos"
-        return
-    end
-    camera_debug.pos_str = string.format("%.3f, %.3f, %.3f", pos.x, pos.y, pos.z)
+    if not pos then return end
 
     local rot = nil
     pcall(function() rot = xform:call("get_Rotation") end)
-    if not rot then
-        camera_debug.stage = "no rot"
-        return
-    end
+    if not rot then return end
 
     local world_offset = quat_rotate_vec3(rot, { x = ox, y = oy, z = oz })
 
@@ -437,13 +400,12 @@ re.on_pre_application_entry("LockScene", function()
         ))
     end)
     camera_offset_applied = true
-    camera_debug.stage = "applied"
 end)
 
 re.on_draw_ui(function()
     if imgui.tree_node("Ironsights") then
 
-        local equipped_id = get_equipped_weapon_id()
+        local equipped_id = cached_weapon_id
         if equipped_id then
             local eid_name = WEAPON_NAMES[equipped_id] or equipped_id
             imgui.text_colored("Equipped: " .. eid_name, 0xFFFFFF00)
@@ -538,18 +500,6 @@ re.on_draw_ui(function()
             save_prefs()
         end
 
---[[
-        if imgui.tree_node("Debug##cam_debug") then
-            imgui.text("Stage: " .. camera_debug.stage)
-            imgui.text("Weapon: " .. camera_debug.weapon_id)
-            imgui.text("Cam type: " .. camera_debug.cam_type)
-            imgui.text("Ctx type: " .. camera_debug.ctx_type)
-            imgui.text("ViewMode raw: " .. camera_debug.view_mode_raw)
-            imgui.text("Cam pos: " .. camera_debug.pos_str)
-            imgui.text("Applied: " .. tostring(camera_offset_applied))
-            imgui.tree_pop()
-        end
---]]
         imgui.tree_pop()
     end
 end)
