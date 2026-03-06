@@ -451,12 +451,113 @@ local function apply_edits_to_table(dt)
     return applied
 end
 
+local function get_attachment_data_table(register)
+    if not register then return nil end
+    local holder = try_field(register, "_AttachmentWeaponEquipParamCatalogUserData")
+    if not holder then return nil end
+    local cd = try_field(holder, "_CatalogData")
+    if cd then
+        local dt = try_field(cd, "_DataTable")
+        if dt then return dt end
+    end
+    local dt = try_field(holder, "_DataTable")
+    if dt then return dt end
+    return nil
+end
+
+local function apply_attachment_shoot_data(sd, edit)
+    if not sd or not edit then return false end
+    set_field_safe(sd, "TypeOfShoot", edit.TypeOfShoot)
+    set_field_safe(sd, "ShotInterval", edit.ShotInterval)
+    set_field_safe(sd, "BurstShotInterval", edit.BurstShotInterval)
+    set_field_safe(sd, "BurstNum", edit.BurstNum)
+    return true
+end
+
+local function apply_edit_to_param(param, edit)
+    if not param or not edit then return 0 end
+    local count = 0
+    local sd = try_field(param, "_ShootData")
+    if sd and apply_attachment_shoot_data(sd, edit) then count = count + 1 end
+    local csd = try_field(param, "_ChangeShootData")
+    if csd and apply_attachment_shoot_data(csd, edit) then count = count + 1 end
+    return count
+end
+
+local function resolve_att_id(entry)
+    if not entry then return nil end
+    local aid_obj = try_field(entry, "_AttachmentIDCache")
+    if not aid_obj then return nil end
+    local s; pcall(function() s = aid_obj:call("ToString") end)
+    if s then return string.lower(s) end
+    pcall(function() s = aid_obj:call("toString") end)
+    if s then return string.lower(s) end
+    return nil
+end
+
+local function att_id_to_weapon_id(att_str)
+    if not att_str then return nil end
+    local digits = att_str:match("ath(%d+)")
+    if not digits or #digits < 4 then return nil end
+    local group = tonumber(digits:sub(1, #digits - 2))
+    if not group or group < 1 then return nil end
+    return "arm" .. string.format("%04d", group - 1)
+end
+
+local function apply_entry_with_levelups(entry, edit)
+    if not entry or not edit then return 0 end
+    local applied = 0
+    local param = try_field(entry, "_Parameter")
+    if param then
+        applied = applied + apply_edit_to_param(param, edit)
+    end
+    local lvl_params = try_field(entry, "_LevelUpParameters")
+    if lvl_params then
+        local lc = 0; pcall(function() lc = lvl_params:call("get_Count") end)
+        if lc == 0 then
+            local len = try_field(lvl_params, "Length")
+            if len then lc = tonumber(len) or 0 end
+        end
+        for li = 0, lc - 1 do
+            local lp; pcall(function() lp = lvl_params:call("get_Item", li) end)
+            if not lp then pcall(function() lp = lvl_params:call("Get", li) end) end
+            if lp then
+                applied = applied + apply_edit_to_param(lp, edit)
+            end
+        end
+    end
+    return applied
+end
+
+local function apply_edits_to_attachments(dt)
+    if not dt then return 0 end
+    local applied = 0
+    local count = 0; pcall(function() count = dt:call("get_Count") end)
+    for i = 0, count - 1 do
+        local entry; pcall(function() entry = dt:call("get_Item", i) end)
+        if not entry then goto continue end
+        local param = try_field(entry, "_Parameter")
+        if not param or not try_field(param, "_ShootData") then goto continue end
+        local att_str = resolve_att_id(entry)
+        local weapon_id = att_id_to_weapon_id(att_str)
+        local edit = weapon_id and rof_edits[weapon_id]
+        if edit then
+            applied = applied + apply_entry_with_levelups(entry, edit)
+        end
+        ::continue::
+    end
+    return applied
+end
+
 local function apply_edits()
     local catalogs = find_all_catalogs(get_scene())
     local total = 0
     for _, catalog in ipairs(catalogs) do
-        local dt = get_data_table(get_register(catalog))
+        local reg = get_register(catalog)
+        local dt = get_data_table(reg)
         total = total + apply_edits_to_table(dt)
+        local adt = get_attachment_data_table(reg)
+        total = total + apply_edits_to_attachments(adt)
     end
     return total
 end
@@ -1198,7 +1299,7 @@ re.on_draw_ui(function()
         end
 
         local sb_changed
-        sb_changed, rof_settings.smooth_burst = imgui.checkbox("Improved Burst Recoil", rof_settings.smooth_burst)
+        sb_changed, rof_settings.smooth_burst = imgui.checkbox("Improved Burst Recoil Animation", rof_settings.smooth_burst)
         if imgui.is_item_hovered() then
             imgui.set_tooltip("Consecutive shots layer properly for a smoother animation")
         end
@@ -1478,6 +1579,13 @@ re.on_draw_ui(function()
             hk.update_hotkey_table(rof_hk_settings.hotkeys)
             json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
         end
+
+        -- Attachment Catalog Debug (commented out, not needed for normal use)
+        -- imgui.separator()
+        -- if imgui.tree_node("Attachment Catalog Debug") then
+        --     ...
+        --     imgui.tree_pop()
+        -- end
 
         imgui.tree_pop()
     end
