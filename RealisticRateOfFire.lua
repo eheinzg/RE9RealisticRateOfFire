@@ -70,11 +70,12 @@ local WEAPON_NAMES = {
     ["arm0505"] = "Freya's Needle",
     ["arm0600"] = "Classic 70",
     ["arm0601"] = "Marksman 1A",
+    ["arm0700"] = "RPG-7",
 }
 
 local WEAPON_KEYS = {
     "arm0000", "arm0001", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007", 
-    "arm0100", "arm0103", "arm0104", "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601"
+    "arm0100", "arm0103", "arm0104", "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601", "arm0700"
 }
 
 local dropdown_options = {}
@@ -994,8 +995,8 @@ re.on_application_entry("UpdateHID", function()
     local lmb_down = hk.check_mouse_button("L Mouse", true) or false
     local shoot_held = rt_down or lmb_down
 
-    -- Smooth Semi-Auto
-    if rof_settings.smooth_semi_auto then
+    -- Smooth Semi-Auto (exclude RPG-7)
+    if rof_settings.smooth_semi_auto and cur_weapon_id ~= "arm0700" then
         if shot_type == 0 or smooth_semi.active then
             if not smooth_semi.active then
                 smooth_semi.active = true
