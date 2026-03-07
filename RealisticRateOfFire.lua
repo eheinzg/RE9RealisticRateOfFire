@@ -13,12 +13,12 @@ local has_applied = false
 local rof_settings_defaults = {
     disable_regrip = true,
     disable_select_fire = false,
-    smooth_semi_auto = false,
-    smooth_burst = false,
+    smooth_semi_auto = true,
+    smooth_burst = true,
     enable_aim_camera_shake = true,
     show_fire_mode_overlay = true,
     fire_mode_limit_semi_full = false,
-    overlay_use_rects = false,
+    overlay_use_rects = true,
     overlay_style = 1,
 }
 local rof_settings = {}
@@ -216,9 +216,28 @@ local function delete_profile(name)
     end
 end
 
+local DEFAULT_PROFILE_NAME = "Realistic Rate of Fire"
+
 load_profile_index()
 if #profile_state.names > 0 and profile_state.names[profile_state.selected] then
     load_profile(profile_state.names[profile_state.selected])
+elseif next(rof_edits) == nil then
+    local ok, data = pcall(json.load_file, PROFILES_DIR .. DEFAULT_PROFILE_NAME .. ".json")
+    if ok and data and data.edits then
+        rof_edits = data.edits
+        if data.enable_aim_camera_shake ~= nil then
+            ui_state.enable_aim_camera_shake = data.enable_aim_camera_shake
+        end
+        if not profile_state.names or #profile_state.names == 0 then
+            profile_state.names = { DEFAULT_PROFILE_NAME }
+            profile_state.selected = 1
+            save_profile_index()
+        end
+        local key = dropdown_items[selected_index]
+        if key then
+            populate_ui_from_vals(rof_edits[key] or rof_defaults[key], key)
+        end
+    end
 end
 
 local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
@@ -738,7 +757,7 @@ local rof_hk_default_settings = {
         ["Pad Fire Mode Toggle"] = "A (X)",
     }
 }
-local rof_hk_settings = hk.merge_tables({}, rof_hk_default_settings) and hk.recurse_def_settings(json.load_file(ROF_HOTKEYS_PATH) or {}, rof_hk_default_settings)
+local rof_hk_settings = hk.recurse_def_settings(json.load_file(ROF_HOTKEYS_PATH) or {}, rof_hk_default_settings)
 hk.setup_hotkeys(rof_hk_settings.hotkeys)
 
 -- ============================================================
@@ -915,7 +934,10 @@ re.on_application_entry("UpdateHID", function()
         end
     end
 
-    if not rof_settings.smooth_semi_auto and not rof_settings.smooth_burst then return end
+    if not rof_settings.smooth_semi_auto and not rof_settings.smooth_burst then
+        cached_eid = get_weapon_id_from_pe(pe)
+        return
+    end
     if not pe then
         smooth_semi.last_pe = nil
         smooth_semi.last_weapon_id = nil
@@ -1369,10 +1391,10 @@ re.on_draw_ui(function()
                     last_equipped_id = equipped_key
                 end
             else
-                imgui.text_colored("Equipped: (field nil)", 0xFFFFFF00)
+                imgui.text_colored("Equipped: (waiting...)", 0xFFFFFF00)
             end
         else
-            imgui.text_colored("Equipped: (not detected)", 0xFFFFFF00)
+            imgui.text_colored("Equipped: (waiting...)", 0xFFFFFF00)
         end
 
         changed, selected_index = imgui.combo("Weapon", selected_index, dropdown_options)

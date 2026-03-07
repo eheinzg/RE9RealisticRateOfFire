@@ -1,8 +1,8 @@
 -- Iron Sights - Per-weapon camera position offset for RE9
 -- Only applies when CurrentViewMode == FPS (1)
 
-local SETTINGS_PATH = "RROF/ironsights.json"
-local PREFS_PATH = "RROF/ironsights_prefs.json"
+local SETTINGS_PATH = "IronSights/ironsights.json"
+local PREFS_PATH = "IronSights/ironsights_prefs.json"
 
 local WEAPON_NAMES = {
     ["arm0000"] = "Matilda IMP",
@@ -45,15 +45,42 @@ local copy_all_confirm = false
 local reset_confirm = false
 
 -- Per-weapon offsets: { ["arm0000"] = { x=0, y=0, z=0 }, ... }
+local DEFAULT_OFFSETS = {
+    ["arm0000"]       = { x =  0.0,    y = -0.037, z = 0.0 },
+    ["arm0001"]       = { x =  0.0,    y = -0.019, z = 0.0 },
+    ["arm0003"]       = { x =  0.0,    y = -0.032, z = 0.0 },
+    ["arm0004"]       = { x =  0.0,    y = -0.020, z = 0.0 },
+    ["arm0005"]       = { x = -0.002,  y = -0.050, z = 0.0 },
+    ["arm0006"]       = { x =  0.0,    y = -0.037, z = 0.0 },
+    ["arm0007"]       = { x =  0.0,    y = -0.039, z = 0.0 },
+    ["arm0100"]       = { x =  0.0,    y = -0.071, z = 0.0 },
+    ["arm0103"]       = { x =  0.0,    y = -0.066, z = 0.0 },
+    ["arm0104"]       = { x =  0.0,    y = -0.068, z = 0.0 },
+    ["arm0400_leon"]  = { x = -0.002,  y = -0.040, z = 0.0 },
+    ["arm0400_grace"] = { x =  0.001,  y = -0.036, z = 0.0 },
+    ["arm0500"]       = { x =  0.0,    y = -0.055, z = 0.0 },
+    ["arm0501"]       = { x =  0.0,    y = -0.044, z = 0.0 },
+    ["arm0503"]       = { x = -0.045,  y = -0.026, z = 0.0 },
+    ["arm0505"]       = { x =  0.0,    y = -0.037, z = 0.0 },
+    ["arm0600"]       = { x =  0.0,    y = -0.055, z = 0.0 },
+    ["arm0601"]       = { x =  0.0,    y = -0.047, z = 0.0 },
+    ["arm0700"]       = { x =  0.0,    y =  0.0,   z = 0.0 },
+}
+
 local weapon_offsets = {}
-local function load_offsets()
-    local saved = json.load_file(SETTINGS_PATH)
-    if saved and type(saved) == "table" then
-        weapon_offsets = saved
-    end
-end
 local function save_offsets()
     json.dump_file(SETTINGS_PATH, weapon_offsets)
+end
+local function load_offsets()
+    local saved = json.load_file(SETTINGS_PATH)
+    if saved and type(saved) == "table" and next(saved) ~= nil then
+        weapon_offsets = saved
+    else
+        for k, v in pairs(DEFAULT_OFFSETS) do
+            weapon_offsets[k] = { x = v.x, y = v.y, z = v.z }
+        end
+        save_offsets()
+    end
 end
 load_offsets()
 
@@ -570,10 +597,18 @@ re.on_draw_ui(function()
             else
                 imgui.text_colored("Reset this weapon?", 0xFF00FFFF)
                 if imgui.button("Yes##reset") then
-                    ui_offset.x = 0.0
-                    ui_offset.y = 0.0
-                    ui_offset.z = 0.0
-                    weapon_offsets[key] = nil
+                    local def = DEFAULT_OFFSETS[key]
+                    if def then
+                        ui_offset.x = def.x
+                        ui_offset.y = def.y
+                        ui_offset.z = def.z
+                        weapon_offsets[key] = { x = def.x, y = def.y, z = def.z }
+                    else
+                        ui_offset.x = 0.0
+                        ui_offset.y = 0.0
+                        ui_offset.z = 0.0
+                        weapon_offsets[key] = nil
+                    end
                     save_offsets()
                     reset_confirm = false
                 end
