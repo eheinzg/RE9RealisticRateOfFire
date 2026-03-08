@@ -2,6 +2,7 @@
 -- Only applies when CurrentViewMode == FPS (1)
 
 local SETTINGS_PATH = "IronSights/ironsights.json"
+local COVER_SETTINGS_PATH = "IronSights/ironsights_cover.json"
 local PREFS_PATH = "IronSights/ironsights_prefs.json"
 
 local WEAPON_NAMES = {
@@ -43,6 +44,9 @@ local selected_index = 1
 local last_equipped_id = nil
 local copy_all_confirm = false
 local reset_confirm = false
+local edit_mode = 1
+local EDIT_MODE_LABELS = { "Normal", "Cover Right", "Cover Left" }
+local EDIT_MODE_COVER_STATE = { nil, "CoverActionRight", "CoverActionLeft" }
 
 -- Per-weapon offsets: { ["arm0000"] = { x=0, y=0, z=0 }, ... }
 local DEFAULT_OFFSETS = {
@@ -84,12 +88,86 @@ local function load_offsets()
 end
 load_offsets()
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false }
+local COVER_STATES = { "CoverActionRight", "CoverActionLeft", "CrouchCoverActionRight", "CrouchCoverActionLeft" }
+local COVER_STATE_LABELS = {
+    CoverActionRight = "Cover Right", CoverActionLeft = "Cover Left",
+    CrouchCoverActionRight = "Crouch Cover Right", CrouchCoverActionLeft = "Crouch Cover Left",
+}
+local COVER_STATE_TO_KEY = {
+    CoverActionRight = "CoverActionRight", CoverActionLeft = "CoverActionLeft",
+    CrouchCoverActionRight = "CoverActionRight", CrouchCoverActionLeft = "CoverActionLeft",
+}
+
+local DEFAULT_COVER_OFFSETS = {
+    ["arm0000|CoverActionRight"] = { x = -0.004, y = -0.044, z = 0.0 },
+    ["arm0000|CoverActionLeft"]  = { x =  0.004, y = -0.044, z = 0.0 },
+    ["arm0001|CoverActionRight"] = { x = -0.007, y = -0.017, z = 0.0 },
+    ["arm0001|CoverActionLeft"]  = { x =  0.007, y = -0.017, z = 0.0 },
+    ["arm0003|CoverActionRight"] = { x = -0.004, y = -0.037, z = 0.0 },
+    ["arm0003|CoverActionLeft"]  = { x =  0.004, y = -0.037, z = 0.0 },
+    ["arm0004|CoverActionRight"] = { x = -0.007, y = -0.017, z = 0.0 },
+    ["arm0004|CoverActionLeft"]  = { x =  0.007, y = -0.017, z = 0.0 },
+    ["arm0005|CoverActionRight"] = { x = -0.001, y = -0.022, z = 0.0 },
+    ["arm0005|CoverActionLeft"]  = { x = -0.001, y = -0.022, z = 0.0 },
+    ["arm0006|CoverActionRight"] = { x = -0.005, y = -0.040, z = 0.0 },
+    ["arm0006|CoverActionLeft"]  = { x =  0.005, y = -0.040, z = 0.0 },
+    ["arm0007|CoverActionRight"] = { x = -0.006, y = -0.042, z = 0.0 },
+    ["arm0007|CoverActionLeft"]  = { x =  0.004, y = -0.043, z = 0.0 },
+    ["arm0100|CoverActionRight"] = { x = -0.020, y = -0.071, z = 0.0 },
+    ["arm0100|CoverActionLeft"]  = { x =  0.020, y = -0.071, z = 0.0 },
+    ["arm0103|CoverActionRight"] = { x = -0.019, y = -0.070, z = 0.0 },
+    ["arm0103|CoverActionLeft"]  = { x =  0.019, y = -0.070, z = 0.0 },
+    ["arm0104|CoverActionRight"] = { x = -0.019, y = -0.067, z = 0.0 },
+    ["arm0104|CoverActionLeft"]  = { x =  0.019, y = -0.067, z = 0.0 },
+    ["arm0400_leon|CoverActionRight"]  = { x = -0.009, y = -0.047, z = 0.0 },
+    ["arm0400_leon|CoverActionLeft"]   = { x =  0.009, y = -0.047, z = 0.0 },
+    ["arm0400_grace|CoverActionRight"] = { x = -0.014, y = -0.026, z = 0.0 },
+    ["arm0400_grace|CoverActionLeft"]  = { x =  0.016, y = -0.030, z = 0.0 },
+    ["arm0500|CoverActionRight"] = { x = -0.019, y = -0.059, z = 0.0 },
+    ["arm0500|CoverActionLeft"]  = { x =  0.019, y = -0.059, z = 0.0 },
+    ["arm0501|CoverActionRight"] = { x = -0.014, y = -0.065, z = 0.0 },
+    ["arm0501|CoverActionLeft"]  = { x =  0.014, y = -0.065, z = 0.0 },
+    ["arm0600|CoverActionRight"] = { x = -0.020, y = -0.060, z = 0.0 },
+    ["arm0600|CoverActionLeft"]  = { x =  0.020, y = -0.060, z = 0.0 },
+    ["arm0601|CoverActionRight"] = { x = -0.015, y = -0.049, z = 0.0 },
+    ["arm0601|CoverActionLeft"]  = { x =  0.015, y = -0.049, z = 0.0 },
+}
+
+local cover_offsets = {}
+local function save_cover_offsets()
+    json.dump_file(COVER_SETTINGS_PATH, cover_offsets)
+end
+local function load_cover_offsets()
+    local saved = json.load_file(COVER_SETTINGS_PATH)
+    if saved and type(saved) == "table" and next(saved) ~= nil then
+        cover_offsets = saved
+    else
+        for k, v in pairs(DEFAULT_COVER_OFFSETS) do
+            cover_offsets[k] = { x = v.x, y = v.y, z = v.z }
+        end
+        save_cover_offsets()
+    end
+end
+load_cover_offsets()
+
+local function get_cover_offset(weapon_key, cover_state)
+    local k = weapon_key .. "|" .. cover_state
+    return cover_offsets[k]
+end
+
+local function set_cover_offset(weapon_key, cover_state, x, y, z)
+    local k = weapon_key .. "|" .. cover_state
+    cover_offsets[k] = { x = x, y = y, z = z }
+    save_cover_offsets()
+end
+
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
         if saved.hide_reticle ~= nil then prefs.hide_reticle = saved.hide_reticle end
         if saved.bullet_from_muzzle ~= nil then prefs.bullet_from_muzzle = saved.bullet_from_muzzle end
+        if saved.muzzle_all_views ~= nil then prefs.muzzle_all_views = saved.muzzle_all_views end
         if saved.transition_in ~= nil then prefs.transition_in = saved.transition_in end
         if saved.transition_out ~= nil then prefs.transition_out = saved.transition_out end
         if saved.transition_swap ~= nil then prefs.transition_swap = saved.transition_swap end
@@ -106,8 +184,13 @@ local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
 -- UI state for the currently selected weapon's sliders
 local ui_offset = { x = 0.0, y = 0.0, z = 0.0 }
 
-local function populate_ui(key)
-    local o = weapon_offsets[key]
+local function populate_ui(key, cover_state)
+    local o
+    if cover_state then
+        o = get_cover_offset(key, cover_state)
+    else
+        o = weapon_offsets[key]
+    end
     if o then
         ui_offset.x = o.x or 0.0
         ui_offset.y = o.y or 0.0
@@ -267,8 +350,8 @@ local function find_muzzle_joint(gun_xf)
 end
 
 re.on_pre_application_entry("UpdateBehavior", function()
-    if not bullet_from_muzzle then return end
-    if cached_view_mode ~= 1 then return end
+    if not bullet_from_muzzle and not prefs.muzzle_all_views then return end
+    if not prefs.muzzle_all_views and cached_view_mode ~= 1 then return end
 
     local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
     if not char_mgr then return end
@@ -314,8 +397,8 @@ do
         if m then
             sdk.hook(m,
                 function(args)
-                    if not bullet_from_muzzle then return end
-                    if cached_view_mode ~= 1 then return end
+                    if not bullet_from_muzzle and not prefs.muzzle_all_views then return end
+                    if not prefs.muzzle_all_views and cached_view_mode ~= 1 then return end
                     if not muzzle_pos or not muzzle_rot then return end
 
                     local pos_ptr = sdk.to_ptr(sdk.to_int64(args[3]))
@@ -341,6 +424,7 @@ end
 
 local STANDARD_FPS_X = -0.09
 local TRANSITION_SFPS = 0.2
+local TRANSITION_ADS = 0.2
 local standard_fps_mode = prefs.standard_fps_mode
 local sfps_toggled_this_frame = false
 
@@ -379,6 +463,8 @@ local camera_offset_applied = false
 local cached_weapon_id = nil
 local cached_character = nil
 local cached_is_holding = false
+local cached_fps_state = nil
+local cached_busy_ads = false
 
 local function get_player_context()
     local cm = sdk.get_managed_singleton("app.CharacterManager")
@@ -456,6 +542,39 @@ re.on_pre_application_entry("LockScene", function()
                     local hold = nil
                     pcall(function() hold = cps:get_field("_IsHold") end)
                     cached_is_holding = hold == true
+
+                    pcall(function()
+                        local state_fps = cps:get_field("_StateFPS")
+                        if state_fps then
+                            local state_val = state_fps:get_field("<State>k__BackingField")
+                            if state_val ~= nil then
+                                local name = nil
+                                pcall(function() name = state_val:call("ToString()") end)
+                                if name then
+                                    cached_fps_state = name
+                                else
+                                    pcall(function() cached_fps_state = state_val:get_field("value__") end)
+                                end
+                            else
+                                cached_fps_state = nil
+                            end
+                        else
+                            cached_fps_state = nil
+                        end
+                    end)
+
+                    cached_busy_ads = false
+                    pcall(function()
+                        local blender = cps:get_field("_CameraBlender")
+                        if blender then
+                            local bct = blender:get_field("<BusyCameraType>k__BackingField")
+                            if bct then
+                                local bct_name = nil
+                                pcall(function() bct_name = bct:call("ToString()") end)
+                                cached_busy_ads = (bct_name == "ADS")
+                            end
+                        end
+                    end)
                 end
             end
         end
@@ -464,6 +583,8 @@ re.on_pre_application_entry("LockScene", function()
         cached_weapon_id = nil
         cached_character = nil
         cached_is_holding = false
+        cached_fps_state = nil
+        cached_busy_ads = false
     end
 
     local cam = sdk.get_primary_camera()
@@ -472,19 +593,34 @@ re.on_pre_application_entry("LockScene", function()
         return
     end
 
-    local is_active = cached_view_mode == 1 and cached_is_holding
-    local o = (is_active and cached_weapon_id) and weapon_offsets[cached_weapon_id] or nil
+    local is_cover = COVER_STATE_TO_KEY[cached_fps_state] ~= nil
+    local is_active = cached_view_mode == 1 and (cached_is_holding or is_cover)
+    local o = nil
+    if is_active and not cached_busy_ads and cached_weapon_id then
+        if is_cover then
+            o = get_cover_offset(cached_weapon_id, COVER_STATE_TO_KEY[cached_fps_state])
+        end
+        if not o then
+            o = weapon_offsets[cached_weapon_id]
+        end
+    end
     local tx = o and o.x or 0
     local ty = o and o.y or 0
     local tz = o and o.z or 0
 
     if standard_fps_mode and is_active then
-        tx = tx + STANDARD_FPS_X
+        tx = STANDARD_FPS_X
         ty = 0
         tz = 0
     end
 
-    transition_set_target(tx, ty, tz, sfps_toggled_this_frame and TRANSITION_SFPS or nil)
+    local override_dur = nil
+    if sfps_toggled_this_frame then
+        override_dur = TRANSITION_SFPS
+    elseif cached_busy_ads and not standard_fps_mode then
+        override_dur = TRANSITION_ADS
+    end
+    transition_set_target(tx, ty, tz, override_dur)
     transition_update()
 
     local ox = transition.cur_x
@@ -546,15 +682,15 @@ re.on_draw_ui(function()
 
         local equipped_id = cached_weapon_id
         if equipped_id then
-            local char_label = cached_character and (" [" .. cached_character:sub(1,1):upper() .. cached_character:sub(2) .. "]") or ""
             local eid_name = WEAPON_NAMES[equipped_id] or equipped_id
-            imgui.text_colored("Equipped: " .. eid_name, 0xFFFFFF00)
+            local state_label = cached_fps_state and (" | " .. (COVER_STATE_LABELS[cached_fps_state] or cached_fps_state)) or ""
+            imgui.text_colored("Equipped: " .. eid_name .. state_label, 0xFFFFFF00)
 
             if equipped_id ~= last_equipped_id then
                 for i, key in ipairs(dropdown_items) do
                     if key == equipped_id then
                         selected_index = i
-                        populate_ui(key)
+                        populate_ui(key, EDIT_MODE_COVER_STATE[edit_mode])
                         break
                     end
                 end
@@ -569,12 +705,21 @@ re.on_draw_ui(function()
         if selected_index < 1 then selected_index = 1 end
         if selected_index > #dropdown_items then selected_index = #dropdown_items end
         if combo_changed then
-            populate_ui(dropdown_items[selected_index])
+            populate_ui(dropdown_items[selected_index], EDIT_MODE_COVER_STATE[edit_mode])
+        end
+
+        local mode_changed
+        mode_changed, edit_mode = imgui.combo("Edit Mode", edit_mode, EDIT_MODE_LABELS)
+        if edit_mode < 1 then edit_mode = 1 end
+        if edit_mode > #EDIT_MODE_LABELS then edit_mode = #EDIT_MODE_LABELS end
+        if mode_changed then
+            populate_ui(dropdown_items[selected_index], EDIT_MODE_COVER_STATE[edit_mode])
         end
 
         imgui.separator()
 
         local key = dropdown_items[selected_index]
+        local cover_state = EDIT_MODE_COVER_STATE[edit_mode]
         if key then
             local any_changed = false
             local cc
@@ -586,8 +731,12 @@ re.on_draw_ui(function()
             if cc then any_changed = true end
 
             if any_changed then
-                weapon_offsets[key] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
-                save_offsets()
+                if cover_state then
+                    set_cover_offset(key, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
+                else
+                    weapon_offsets[key] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
+                    save_offsets()
+                end
             end
 
             if not reset_confirm then
@@ -597,19 +746,36 @@ re.on_draw_ui(function()
             else
                 imgui.text_colored("Reset this weapon?", 0xFF00FFFF)
                 if imgui.button("Yes##reset") then
-                    local def = DEFAULT_OFFSETS[key]
-                    if def then
-                        ui_offset.x = def.x
-                        ui_offset.y = def.y
-                        ui_offset.z = def.z
-                        weapon_offsets[key] = { x = def.x, y = def.y, z = def.z }
+                    if cover_state then
+                        local ck = key .. "|" .. cover_state
+                        local def = DEFAULT_COVER_OFFSETS[ck]
+                        if def then
+                            ui_offset.x = def.x
+                            ui_offset.y = def.y
+                            ui_offset.z = def.z
+                            cover_offsets[ck] = { x = def.x, y = def.y, z = def.z }
+                        else
+                            ui_offset.x = 0.0
+                            ui_offset.y = 0.0
+                            ui_offset.z = 0.0
+                            cover_offsets[ck] = nil
+                        end
+                        save_cover_offsets()
                     else
-                        ui_offset.x = 0.0
-                        ui_offset.y = 0.0
-                        ui_offset.z = 0.0
-                        weapon_offsets[key] = nil
+                        local def = DEFAULT_OFFSETS[key]
+                        if def then
+                            ui_offset.x = def.x
+                            ui_offset.y = def.y
+                            ui_offset.z = def.z
+                            weapon_offsets[key] = { x = def.x, y = def.y, z = def.z }
+                        else
+                            ui_offset.x = 0.0
+                            ui_offset.y = 0.0
+                            ui_offset.z = 0.0
+                            weapon_offsets[key] = nil
+                        end
+                        save_offsets()
                     end
-                    save_offsets()
                     reset_confirm = false
                 end
                 imgui.same_line()
@@ -626,9 +792,13 @@ re.on_draw_ui(function()
                 imgui.text_colored("Apply to all weapons?", 0xFF00FFFF)
                 if imgui.button("Yes") then
                     for _, wk in ipairs(WEAPON_KEYS) do
-                        weapon_offsets[wk] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
+                        if cover_state then
+                            set_cover_offset(wk, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
+                        else
+                            weapon_offsets[wk] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
+                        end
                     end
-                    save_offsets()
+                    if not cover_state then save_offsets() end
                     copy_all_confirm = false
                 end
                 imgui.same_line()
@@ -662,6 +832,21 @@ re.on_draw_ui(function()
                     imgui.text_colored("  All joints: " .. muzzle_debug_all_joints, 0xFF00FFFF)
                 end
             end
+        end
+
+        local mav_changed
+        mav_changed, prefs.muzzle_all_views = imgui.checkbox("Bullets Follow Muzzle (All Views)", prefs.muzzle_all_views)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Spawn bullets from the muzzle in both first-person and third-person")
+        end
+        if mav_changed then
+            if not prefs.muzzle_all_views then
+                muzzle_joint = nil
+                muzzle_cached_gun_go = nil
+                muzzle_pos = nil
+                muzzle_rot = nil
+            end
+            save_prefs()
         end
 
         imgui.spacing()
