@@ -244,6 +244,7 @@ end
 local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
 local TYPE_WeaponCatalogRegister = sdk.typeof("app.WeaponCatalogRegister")
 local TYPE_Motion = sdk.typeof("via.motion.Motion")
+local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
 
 local function try_call(obj, method)
     local r; pcall(function() r = obj:call(method) end); return r
@@ -905,9 +906,24 @@ local function get_burst_num_for_equipped()
     return 3
 end
 
+local _cached_cps = nil
+
 re.on_application_entry("UpdateHID", function()
     local pe = get_player_equipment()
     cached_pe = pe
+
+    if pe then
+        local ctx = get_player()
+        if ctx then
+            local go = nil
+            pcall(function() go = ctx:call("get_GameObject") end)
+            if go and TYPE_CameraPosSetting then
+                pcall(function() _cached_cps = go:call("getComponent(System.Type)", TYPE_CameraPosSetting) end)
+            end
+        end
+    else
+        _cached_cps = nil
+    end
 
     -- Smooth Semi-Auto cleanup when disabled
     if not rof_settings.smooth_semi_auto then
@@ -994,6 +1010,7 @@ re.on_application_entry("UpdateHID", function()
     local rt_down = hk.check_pad_button("RT (R2)", true) or false
     local lmb_down = hk.check_mouse_button("L Mouse", true) or false
     local shoot_held = rt_down or lmb_down
+    _rof_shoot_held = shoot_held
 
     -- Smooth Semi-Auto (exclude RPG-7)
     if rof_settings.smooth_semi_auto and cur_weapon_id ~= "arm0700" then
@@ -1102,6 +1119,19 @@ end
 
 local regrip_action_log = {}
 local regrip_hook_status = "searching..."
+local _rof_debug_action_log = false
+local _rof_debug_mode = false
+local _rof_shoot_held = false
+
+local function read_is_hold()
+    if not _cached_cps then return false end
+    local result = false
+    pcall(function()
+        local hold = _cached_cps:get_field("_IsHold")
+        result = (hold == true)
+    end)
+    return result
+end
 
 do
     local cp_type = sdk.find_type_definition("app.Cp_A000Updater")
@@ -1130,43 +1160,30 @@ do
             sdk.hook(req_method,
                 function(args)
                     if not disable_regrip then return end
-                    local display = nil
+                    local is_hold = read_is_hold()
+                    if not is_hold then return end
+                    local found_hash = nil
                     for i = 3, 5 do
                         if args[i] then
                             pcall(function()
                                 local obj = sdk.to_managed_object(args[i])
                                 if obj then
-                                    local name = nil
-                                    pcall(function() name = obj:get_field("_name") end)
-                                    if not name then pcall(function() name = obj:get_field("Name") end) end
-                                    if not name then pcall(function() name = obj:get_field("_Name") end) end
-                                    if not name then pcall(function() name = obj:call("get_Name") end) end
-                                    if not name then pcall(function() name = obj:call("getString") end) end
-
-                                    local hash = nil
-                                    pcall(function() hash = obj:get_field("_hash") end)
-                                    if not hash then pcall(function() hash = obj:get_field("Hash") end) end
-                                    if not hash then pcall(function() hash = obj:get_field("_Hash") end) end
-                                    if not hash then pcall(function() hash = obj:call("get_Hash") end) end
-
-                                    if name and tostring(name) ~= "app.NameHash" then
-                                        display = tostring(name)
-                                    elseif hash then
-                                        display = "hash:" .. tostring(hash)
-                                    end
+                                    if not found_hash then pcall(function() found_hash = obj:call("get_Hash") end) end
                                 end
                             end)
-                            if display then break end
                         end
                     end
 
-                    if display then
-                        -- if #regrip_action_log >= 40 then table.remove(regrip_action_log, 1) end
-                        -- regrip_action_log[#regrip_action_log + 1] = display
-                        if display:lower():find("regrip") or display == "hash:3980252629" then
-                            -- regrip_action_log[#regrip_action_log + 1] = ">> BLOCKED: " .. display
-                            return sdk.PreHookResult.SKIP_ORIGINAL
+                    if _rof_debug_action_log and found_hash then
+                        if #regrip_action_log >= 40 then table.remove(regrip_action_log, 1) end
+                        regrip_action_log[#regrip_action_log + 1] = "hash:" .. tostring(found_hash)
+                    end
+
+                    if found_hash and tostring(found_hash) == "3980252629" and is_hold then
+                        if _rof_debug_action_log then
+                            regrip_action_log[#regrip_action_log + 1] = ">> BLOCKED: hash:3980252629"
                         end
+                        return sdk.PreHookResult.SKIP_ORIGINAL
                     end
                 end,
                 function(retval) return retval end
@@ -1199,7 +1216,7 @@ if sm_type then
     if m then
         sdk.hook(m,
             function() return sdk.PreHookResult.CALL_ORIGINAL end,
-            function(retval) has_applied = false; return retval end
+            function(retval) has_applied = false; _cached_cps = nil; return retval end
         )
     end
 end
@@ -1289,21 +1306,6 @@ re.on_draw_ui(function()
             ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
         end
 
-        -- local regrip_changed = false
-        -- regrip_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
-        -- if regrip_changed then
-        --     rof_settings.disable_regrip = disable_regrip
-        --     save_settings()
-        --     ui_state.status = "Regrip animation " .. (disable_regrip and "disabled" or "enabled")
-        -- end
-        -- if imgui.tree_node("Action Log") then
-        --     imgui.text("Hook: " .. regrip_hook_status)
-        --     if imgui.button("Clear") then regrip_action_log = {} end
-        --     for _, entry in ipairs(regrip_action_log) do
-        --         imgui.text(entry)
-        --     end
-        --     imgui.tree_pop()
-        -- end
 
         local sf_changed
         sf_changed, rof_settings.disable_select_fire = imgui.checkbox("Disable Select Fire", rof_settings.disable_select_fire)
@@ -1624,6 +1626,81 @@ re.on_draw_ui(function()
         --     ...
         --     imgui.tree_pop()
         -- end
+
+        imgui.separator()
+        local dbg_changed
+        dbg_changed, _rof_debug_mode = imgui.checkbox("Debug Mode", _rof_debug_mode)
+        if dbg_changed and not _rof_debug_mode then
+            _rof_debug_action_log = false
+            regrip_action_log = {}
+        end
+
+        if _rof_debug_mode then
+            if imgui.tree_node("Debug: Animation Hash Log") then
+                local log_changed
+                log_changed, _rof_debug_action_log = imgui.checkbox("Enable Logging", _rof_debug_action_log)
+                if log_changed and not _rof_debug_action_log then
+                    regrip_action_log = {}
+                end
+                imgui.text("Hook: " .. regrip_hook_status)
+                local dss_val = "?"
+                pcall(function()
+                    local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
+                    if char_mgr then
+                        local ctx = char_mgr:call("get_PlayerContextFast")
+                        if ctx then
+                            local updater = ctx:call("get_Updater")
+                            local gun = updater and updater:call("get_EquipWeapon")
+                            if gun then
+                                local v = gun:get_field("<DisableShootState>k__BackingField")
+                                dss_val = tostring(v)
+                            else
+                                dss_val = "no gun"
+                            end
+                        end
+                    end
+                end)
+                imgui.text("DisableShootState: " .. dss_val)
+                imgui.text("smooth_semi.active: " .. tostring(smooth_semi.active))
+                imgui.text("_IsHold (live): " .. tostring(read_is_hold()))
+                local diag = {}
+                pcall(function()
+                    local ctx = get_player()
+                    diag[#diag+1] = "ctx: " .. tostring(ctx ~= nil)
+                    if ctx then
+                        local go = nil
+                        pcall(function() go = ctx:call("get_GameObject") end)
+                        diag[#diag+1] = "go: " .. tostring(go ~= nil)
+                        if go and TYPE_CameraPosSetting then
+                            local cps = nil
+                            pcall(function() cps = go:call("getComponent(System.Type)", TYPE_CameraPosSetting) end)
+                            diag[#diag+1] = "cps: " .. tostring(cps ~= nil)
+                            if cps then
+                                local hold = nil
+                                pcall(function() hold = cps:get_field("_IsHold") end)
+                                diag[#diag+1] = "_IsHold: " .. tostring(hold)
+                            end
+                        end
+                        diag[#diag+1] = "TYPE_CPS: " .. tostring(TYPE_CameraPosSetting ~= nil)
+                    end
+                    diag[#diag+1] = "pe: " .. tostring(cached_pe ~= nil)
+                end)
+                for _, d in ipairs(diag) do
+                    imgui.text("  " .. d)
+                end
+                imgui.text("cached_eid: " .. tostring(cached_eid))
+                if imgui.button("Clear") then regrip_action_log = {} end
+                for _, entry in ipairs(regrip_action_log) do
+                    imgui.text(entry)
+                end
+                imgui.tree_pop()
+            end
+        end
+
+        imgui.separator()
+        imgui.text("v1.3 -")
+        imgui.same_line(0, 0)
+        imgui.text_colored("ErwinGunsmith", 0xFF38A880)
 
         imgui.tree_pop()
     end
