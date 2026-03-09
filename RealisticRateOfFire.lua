@@ -246,12 +246,6 @@ local TYPE_WeaponCatalogRegister = sdk.typeof("app.WeaponCatalogRegister")
 local TYPE_Motion = sdk.typeof("via.motion.Motion")
 local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
 
-local _cached_char_mgr = sdk.get_managed_singleton("app.CharacterManager")
-
-local _sm_singleton = sdk.get_native_singleton("via.SceneManager")
-local _sm_typedef = sdk.find_type_definition("via.SceneManager")
-local _sv_typedef = sdk.find_type_definition("via.SceneView")
-
 local function try_call(obj, method)
     local r; pcall(function() r = obj:call(method) end); return r
 end
@@ -317,7 +311,9 @@ local function apply_recoil_values(crp, recoil)
 end
 
 local function get_scene()
-    return _sm_singleton and _sm_typedef and sdk.call_native_func(_sm_singleton, _sm_typedef, "get_CurrentScene")
+    local sm = sdk.get_native_singleton("via.SceneManager")
+    local sm_type = sm and sdk.find_type_definition("via.SceneManager")
+    return sm_type and sdk.call_native_func(sm, sm_type, "get_CurrentScene")
 end
 
 local function find_all_catalogs(scene)
@@ -680,12 +676,10 @@ end
 load_defaults()
 
 local function get_player()
-    if not _cached_char_mgr then
-        _cached_char_mgr = sdk.get_managed_singleton("app.CharacterManager")
-    end
-    if not _cached_char_mgr then return nil end
+    local cm = sdk.get_managed_singleton("app.CharacterManager")
+    if not cm then return nil end
     local ctx = nil
-    pcall(function() ctx = _cached_char_mgr:call("getPlayerContextRef") end)
+    pcall(function() ctx = cm:call("getPlayerContextRef") end)
     return ctx
 end
 
@@ -720,8 +714,6 @@ local function get_equipped_weapon_id()
 end
 
 local cached_pe = nil
-local _cached_ctx = nil
-local _cached_go = nil
 local cached_eid = nil
 local cached_frame = -1
 
@@ -905,7 +897,7 @@ re.on_application_entry("UpdateBehavior", function()
 end)
 
 local function get_burst_num_for_equipped()
-    local eid_str = cached_eid or get_weapon_id_from_pe(cached_pe)
+    local eid_str = cached_eid or get_weapon_id_from_pe(get_player_equipment())
     if not eid_str then return 3 end
     local edit = rof_edits[eid_str]
     if edit and edit.BurstNum then return edit.BurstNum end
@@ -915,32 +907,35 @@ local function get_burst_num_for_equipped()
 end
 
 local _cached_cps = nil
+local _rof_shoot_held = false
+local _rof_shoot_held_until = 0
+
+local function read_is_hold()
+    if not _cached_cps then return false end
+    local result = false
+    pcall(function()
+        local hold = _cached_cps:get_field("_IsHold")
+        result = (hold == true)
+    end)
+    return result
+end
 
 re.on_application_entry("UpdateHID", function()
-    if not _cached_ctx or not _cached_go or not cached_pe then
-        _cached_ctx = nil
-        _cached_go = nil
+    local pe = get_player_equipment()
+    cached_pe = pe
+
+    if pe then
+        local ctx = get_player()
+        if ctx then
+            local go = nil
+            pcall(function() go = ctx:call("get_GameObject") end)
+            if go and TYPE_CameraPosSetting then
+                pcall(function() _cached_cps = go:call("getComponent(System.Type)", TYPE_CameraPosSetting) end)
+            end
+        end
+    else
         _cached_cps = nil
-        cached_pe = nil
-
-        if not _cached_char_mgr then
-            _cached_char_mgr = sdk.get_managed_singleton("app.CharacterManager")
-        end
-        if _cached_char_mgr then
-            pcall(function() _cached_ctx = _cached_char_mgr:call("getPlayerContextRef") end)
-        end
-        if _cached_ctx then
-            pcall(function() _cached_go = _cached_ctx:call("get_GameObject") end)
-        end
-        if _cached_go and TYPE_PlayerEquipment then
-            pcall(function() cached_pe = _cached_go:call("getComponent(System.Type)", TYPE_PlayerEquipment) end)
-        end
-        if _cached_go and TYPE_CameraPosSetting then
-            pcall(function() _cached_cps = _cached_go:call("getComponent(System.Type)", TYPE_CameraPosSetting) end)
-        end
     end
-
-    local pe = cached_pe
 
     -- Smooth Semi-Auto cleanup when disabled
     if not rof_settings.smooth_semi_auto then
@@ -1027,7 +1022,30 @@ re.on_application_entry("UpdateHID", function()
     local rt_down = hk.check_pad_button("RT (R2)", true) or false
     local lmb_down = hk.check_mouse_button("L Mouse", true) or false
     local shoot_held = rt_down or lmb_down
-    _rof_shoot_held = shoot_held
+    if shoot_held then
+        _rof_shoot_held_until = os.clock() + 0.5
+    end
+    _rof_shoot_held = shoot_held or (os.clock() < _rof_shoot_held_until)
+
+    local is_holding_weapon = read_is_hold()
+    if not is_holding_weapon then
+        if smooth_semi.active then
+            smooth_semi.active = false
+            smooth_semi.display_mode = nil
+            smooth_semi.has_fired = false
+            smooth_semi.shoot_held = false
+            pcall(function() pe:set_field("_EquipShotType", 0) end)
+            smooth_semi_set_dss(pe, false)
+        end
+        if smooth_burst.active then
+            smooth_burst.active = false
+            smooth_burst.display_mode = nil
+            smooth_burst.shot_count = 0
+            smooth_burst.shoot_held = false
+            pcall(function() pe:set_field("_EquipShotType", 2) end)
+            smooth_semi_set_dss(pe, false)
+        end
+    end
 
     -- Smooth Semi-Auto (exclude RPG-7)
     if rof_settings.smooth_semi_auto and cur_weapon_id ~= "arm0700" then
@@ -1055,6 +1073,7 @@ re.on_application_entry("UpdateHID", function()
                 smooth_semi.active = false
                 smooth_semi.display_mode = nil
                 smooth_semi.has_fired = false
+                smooth_semi_set_dss(pe, false)
             end
         end
     end
@@ -1085,6 +1104,7 @@ re.on_application_entry("UpdateHID", function()
                 smooth_burst.active = false
                 smooth_burst.display_mode = nil
                 smooth_burst.shot_count = 0
+                smooth_semi_set_dss(pe, false)
             end
         end
     end
@@ -1124,9 +1144,13 @@ do
 end
 
 local function get_player_motion()
-    if not _cached_go or not TYPE_Motion then return nil end
+    local ctx = get_player()
+    if not ctx then return nil end
+    local go = nil
+    pcall(function() go = ctx:call("get_GameObject") end)
+    if not go or not TYPE_Motion then return nil end
     local motion = nil
-    pcall(function() motion = _cached_go:call("getComponent(System.Type)", TYPE_Motion) end)
+    pcall(function() motion = go:call("getComponent(System.Type)", TYPE_Motion) end)
     return motion
 end
 
@@ -1134,17 +1158,9 @@ local regrip_action_log = {}
 local regrip_hook_status = "searching..."
 local _rof_debug_action_log = false
 local _rof_debug_mode = false
-local _rof_shoot_held = false
-
-local function read_is_hold()
-    if not _cached_cps then return false end
-    local result = false
-    pcall(function()
-        local hold = _cached_cps:get_field("_IsHold")
-        result = (hold == true)
-    end)
-    return result
-end
+local _rof_hook_paused = false
+local _regrip_name_hash = nil
+local _regrip_needs_restore = false
 
 do
     local cp_type = sdk.find_type_definition("app.Cp_A000Updater")
@@ -1170,20 +1186,33 @@ do
         local req_method = find_method_in_hierarchy(cp_type, "requestTransitionFsmNode")
         if req_method then
             regrip_hook_status = "hooked requestTransitionFsmNode"
+
             sdk.hook(req_method,
                 function(args)
-                    if not disable_regrip then return end
-                    local is_hold = read_is_hold()
-                    if not is_hold then return end
+                    if _rof_hook_paused then return end
+
                     local found_hash = nil
+                    local hash_obj = nil
                     for i = 3, 5 do
                         if args[i] then
                             pcall(function()
                                 local obj = sdk.to_managed_object(args[i])
                                 if obj then
-                                    if not found_hash then pcall(function() found_hash = obj:call("get_Hash") end) end
+                                    local h = nil
+                                    pcall(function() h = obj:call("get_Hash") end)
+                                    if h and not found_hash then
+                                        found_hash = h
+                                        hash_obj = obj
+                                    end
                                 end
                             end)
+                        end
+                    end
+
+                    if found_hash and tostring(found_hash) == "3980252629" and not _regrip_name_hash then
+                        _regrip_name_hash = hash_obj
+                        if _rof_debug_action_log then
+                            regrip_action_log[#regrip_action_log + 1] = ">> CAPTURED NameHash obj for 3980252629"
                         end
                     end
 
@@ -1192,7 +1221,12 @@ do
                         regrip_action_log[#regrip_action_log + 1] = "hash:" .. tostring(found_hash)
                     end
 
-                    if found_hash and tostring(found_hash) == "3980252629" and is_hold then
+                    if not disable_regrip then return end
+                    local is_hold = read_is_hold()
+                    if not is_hold then return end
+
+                    if found_hash and tostring(found_hash) == "3980252629" and _rof_shoot_held then
+                        _regrip_needs_restore = true
                         if _rof_debug_action_log then
                             regrip_action_log[#regrip_action_log + 1] = ">> BLOCKED: hash:3980252629"
                         end
@@ -1201,6 +1235,55 @@ do
                 end,
                 function(retval) return retval end
             )
+
+            local _prev_smooth_semi_active = false
+            re.on_application_entry("UpdateBehavior", function()
+                if not disable_regrip then return end
+
+                local semi_active = smooth_semi.active
+                local just_deactivated = _prev_smooth_semi_active and not semi_active
+                _prev_smooth_semi_active = semi_active
+
+                local should_restore = (_regrip_needs_restore and not _rof_shoot_held) or just_deactivated
+
+                if should_restore and _regrip_name_hash then
+                    local ok, err = pcall(function()
+                        local char_mgr = _cached_char_mgr or sdk.get_managed_singleton("app.CharacterManager")
+                        if char_mgr then
+                            local ctx = char_mgr:call("getPlayerContextRef")
+                            if ctx then
+                                local upd = ctx:call("get_Updater")
+                                if upd then
+                                    upd:call("requestTransitionFsmNode", _regrip_name_hash, nil, nil)
+                                    if _rof_debug_action_log then
+                                        regrip_action_log[#regrip_action_log + 1] = ">> RE-INJECTED: hash:3980252629"
+                                    end
+                                else
+                                    if _rof_debug_action_log then
+                                        regrip_action_log[#regrip_action_log + 1] = ">> RESTORE FAIL: no updater"
+                                    end
+                                end
+                            else
+                                if _rof_debug_action_log then
+                                    regrip_action_log[#regrip_action_log + 1] = ">> RESTORE FAIL: no ctx"
+                                end
+                            end
+                        else
+                            if _rof_debug_action_log then
+                                regrip_action_log[#regrip_action_log + 1] = ">> RESTORE FAIL: no char_mgr"
+                            end
+                        end
+                    end)
+                    if not ok and _rof_debug_action_log then
+                        regrip_action_log[#regrip_action_log + 1] = ">> RESTORE ERROR: " .. tostring(err)
+                    end
+                    _regrip_needs_restore = false
+                elseif should_restore and not _regrip_name_hash then
+                    if _rof_debug_action_log then
+                        regrip_action_log[#regrip_action_log + 1] = ">> RESTORE SKIP: no NameHash captured yet"
+                    end
+                end
+            end)
         else
             regrip_hook_status = "requestTransitionFsmNode not found"
         end
@@ -1223,12 +1306,13 @@ re.on_pre_application_entry("LockScene", function()
     if apply_edits() > 0 then has_applied = true end
 end)
 
-if _sm_typedef then
-    local m = _sm_typedef:get_method("begin_change_sceneByString")
+local sm_type = sdk.find_type_definition("via.SceneManager")
+if sm_type then
+    local m = sm_type:get_method("begin_change_sceneByString")
     if m then
         sdk.hook(m,
             function() return sdk.PreHookResult.CALL_ORIGINAL end,
-            function(retval) has_applied = false; _cached_ctx = nil; _cached_go = nil; _cached_cps = nil; cached_pe = nil; return retval end
+            function(retval) has_applied = false; _cached_cps = nil; return retval end
         )
     end
 end
@@ -1341,7 +1425,7 @@ re.on_draw_ui(function()
             if not rof_settings.smooth_semi_auto and smooth_semi.active then
                 smooth_semi.active = false
                 smooth_semi.display_mode = nil
-                local pe = cached_pe
+                local pe = get_player_equipment()
                 if pe then
                     pcall(function() pe:set_field("_EquipShotType", 0) end)
                     smooth_semi_set_dss(pe, false)
@@ -1362,13 +1446,19 @@ re.on_draw_ui(function()
             if not rof_settings.smooth_burst and smooth_burst.active then
                 smooth_burst.active = false
                 smooth_burst.display_mode = nil
-                local pe = cached_pe
+                local pe = get_player_equipment()
                 if pe then
                     pcall(function() pe:set_field("_EquipShotType", 2) end)
                     smooth_semi_set_dss(pe, false)
                 end
             end
             ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
+        end
+
+        local dr_changed
+        dr_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Blocks the regrip/re-cock animation between shots for smoother consecutive fire")
         end
         imgui.separator()
 
@@ -1654,11 +1744,21 @@ re.on_draw_ui(function()
                 if log_changed and not _rof_debug_action_log then
                     regrip_action_log = {}
                 end
+                _, _rof_hook_paused = imgui.checkbox("Pause Hook", _rof_hook_paused)
                 imgui.text("Hook: " .. regrip_hook_status)
+                local block_active = disable_regrip and not _rof_hook_paused and read_is_hold() and _rof_shoot_held
+                imgui.text("Blocking: " .. tostring(block_active))
+                imgui.text("  disable_regrip: " .. tostring(disable_regrip))
+                imgui.text("  hook_paused: " .. tostring(_rof_hook_paused))
+                imgui.text("  _IsHold: " .. tostring(read_is_hold()))
+                imgui.text("  shoot_held: " .. tostring(_rof_shoot_held))
+                imgui.text("  needs_restore: " .. tostring(_regrip_needs_restore))
+                imgui.text("  name_hash_captured: " .. tostring(_regrip_name_hash ~= nil))
                 local dss_val = "?"
                 pcall(function()
-                    if _cached_char_mgr then
-                        local ctx = _cached_char_mgr:call("get_PlayerContextFast")
+                    local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
+                    if char_mgr then
+                        local ctx = char_mgr:call("get_PlayerContextFast")
                         if ctx then
                             local updater = ctx:call("get_Updater")
                             local gun = updater and updater:call("get_EquipWeapon")
@@ -1704,6 +1804,42 @@ re.on_draw_ui(function()
                 for _, entry in ipairs(regrip_action_log) do
                     imgui.text(entry)
                 end
+                imgui.separator()
+                if imgui.button("Dump Cp_A000Updater Methods") then
+                    local lines = {}
+                    local cp_td = sdk.find_type_definition("app.Cp_A000Updater")
+                    local t = cp_td
+                    while t do
+                        local methods = t:get_methods()
+                        for _, m in ipairs(methods) do
+                            lines[#lines + 1] = t:get_full_name() .. ": " .. m:get_name()
+                        end
+                        t = t:get_parent_type()
+                    end
+                    json.dump_file("RROF/debug_cp_methods.txt", lines)
+                end
+                if imgui.button("Dump PlayerGun Methods") then
+                    local lines = {}
+                    pcall(function()
+                        local ctx = get_player()
+                        if ctx then
+                            local upd = ctx:call("get_Updater")
+                            local gun = upd and upd:call("get_EquipWeapon")
+                            if gun then
+                                local gun_td = gun:get_type_definition()
+                                local t = gun_td
+                                while t do
+                                    local methods = t:get_methods()
+                                    for _, m in ipairs(methods) do
+                                        lines[#lines + 1] = t:get_full_name() .. ": " .. m:get_name()
+                                    end
+                                    t = t:get_parent_type()
+                                end
+                            end
+                        end
+                    end)
+                    json.dump_file("RROF/debug_gun_methods.txt", lines)
+                end
                 imgui.tree_pop()
             end
         end
@@ -1720,6 +1856,9 @@ end)
 local fire_mode_display_timer = 0
 local fire_mode_display_duration = 2.0
 local last_displayed_mode = nil
+local sm_singleton = sdk.get_native_singleton("via.SceneManager")
+local sm_typedef = sdk.find_type_definition("via.SceneManager")
+local sv_typedef = sdk.find_type_definition("via.SceneView")
 
 re.on_frame(function()
     if not show_fire_mode_overlay then return end
@@ -1749,8 +1888,8 @@ re.on_frame(function()
 
     local size = nil
     pcall(function()
-        local view = sdk.call_native_func(_sm_singleton, _sm_typedef, "get_MainView")
-        size = sdk.call_native_func(view, _sv_typedef, "get_WindowSize")
+        local view = sdk.call_native_func(sm_singleton, sm_typedef, "get_MainView")
+        size = sdk.call_native_func(view, sv_typedef, "get_WindowSize")
     end)
     if not size then return end
 
