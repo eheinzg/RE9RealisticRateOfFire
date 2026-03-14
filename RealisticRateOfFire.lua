@@ -11,8 +11,8 @@ local rof_defaults = {}
 local has_applied = false
 
 local rof_settings_defaults = {
-    disable_regrip = true,
-    disable_select_fire = false,
+    disable_regrip = false,
+    disable_select_fire = true,
     smooth_semi_auto = true,
     smooth_burst = true,
     enable_aim_camera_shake = true,
@@ -20,6 +20,7 @@ local rof_settings_defaults = {
     fire_mode_limit_semi_full = false,
     overlay_use_rects = true,
     overlay_style = 1,
+    overlay_always_show = false,
 }
 local rof_settings = {}
 do
@@ -48,7 +49,7 @@ if rof_settings.overlay_style == nil or rof_settings.overlay_style == 1 then
     end
 end
 
-local OVERLAY_STYLES = { "None", "Circles", "Rectangles" }
+local OVERLAY_STYLES = { "None", "Circles", "Rectangles", "Text" }
 
 local disable_regrip = true
 
@@ -244,7 +245,7 @@ end
 local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
 local TYPE_WeaponCatalogRegister = sdk.typeof("app.WeaponCatalogRegister")
 local TYPE_Motion = sdk.typeof("via.motion.Motion")
-local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
+local TYPE_BodyAddCtrlDriver = sdk.typeof("app.BodyAddCtrlDriver")
 
 local function try_call(obj, method)
     local r; pcall(function() r = obj:call(method) end); return r
@@ -270,6 +271,52 @@ local function resolve_camera_recoil(weapon_data)
     local wp = try_field(weapon_data, "WeaponParameter") or try_field(weapon_data, "_WeaponParameter")
     if not wp then return nil end
     return try_field(wp, "_CameraRecoilParam") or try_field(wp, "CameraRecoilParam")
+end
+
+local function resolve_shot_camera_shake_move(weapon_data)
+    if not weapon_data then return nil end
+    local wp = try_field(weapon_data, "WeaponParameter") or try_field(weapon_data, "_WeaponParameter")
+    if not wp then return nil end
+    local scsp = try_field(wp, "_ShotCameraShakeParam") or try_field(wp, "ShotCameraShakeParam")
+    if not scsp then return nil end
+    return try_field(scsp, "_Move") or try_field(scsp, "Move")
+end
+
+local function read_shot_camera_shake_move(weapon_data)
+    local move = resolve_shot_camera_shake_move(weapon_data)
+    if not move then return nil end
+    local tx = try_field(move, "_TranslationXRange")
+    local ty = try_field(move, "_TranslationYRange")
+    local tz = try_field(move, "_TranslationZRange")
+    if not tx and not ty and not tz then return nil end
+    return {
+        tx_s = tx and tonumber(tx.s) or 0, tx_r = tx and tonumber(tx.r) or 0,
+        ty_s = ty and tonumber(ty.s) or 0, ty_r = ty and tonumber(ty.r) or 0,
+        tz_s = tz and tonumber(tz.s) or 0, tz_r = tz and tonumber(tz.r) or 0,
+    }
+end
+
+local function apply_shot_camera_shake_move(weapon_data, scsm)
+    if not scsm then return end
+    local move = resolve_shot_camera_shake_move(weapon_data)
+    if not move then return end
+    local move_type = move:get_type_definition()
+    local fields = {
+        { name = "_TranslationXRange", sk = "tx_s", rk = "tx_r" },
+        { name = "_TranslationYRange", sk = "ty_s", rk = "ty_r" },
+        { name = "_TranslationZRange", sk = "tz_s", rk = "tz_r" },
+    }
+    for _, fld in ipairs(fields) do
+        local f = move_type:get_field(fld.name)
+        if f then
+            local range_val = try_field(move, fld.name)
+            if range_val then
+                range_val.s = scsm[fld.sk] or range_val.s
+                range_val.r = scsm[fld.rk] or range_val.r
+                write_valuetype(move, f:get_offset_from_base(), range_val)
+            end
+        end
+    end
 end
 
 local function read_recoil_values(crp)
@@ -409,6 +456,24 @@ local function get_entry_id(weapon_data)
     end
 end
 
+local function find_weapon_data_by_key(target_key)
+    local catalogs = find_all_catalogs(get_scene())
+    for _, catalog in ipairs(catalogs) do
+        local dt = get_data_table(get_register(catalog))
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                local wd; pcall(function() wd = dt:call("get_Item", i) end)
+                if wd then
+                    local id = get_entry_id(wd)
+                    if id == target_key then return wd end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function resolve_shoot_data(weapon_data)
     if not weapon_data then return nil end
     local paths = {
@@ -465,6 +530,9 @@ local function apply_edits_to_table(dt)
                     if crp then
                         apply_recoil_values(crp, edit.recoil)
                     end
+                end
+                if edit.shot_camera_shake_move then
+                    apply_shot_camera_shake_move(wd, edit.shot_camera_shake_move)
                 end
             end
         end
@@ -607,6 +675,10 @@ local function read_live_values(weapon_key)
                             if recoil then
                                 vals.recoil = recoil
                             end
+                            local scsm = read_shot_camera_shake_move(wd)
+                            if scsm then
+                                vals.shot_camera_shake_move = scsm
+                            end
                             return vals
                         end
                     end
@@ -656,6 +728,13 @@ local function capture_defaults()
                             if recoil then
                                 entry.recoil = recoil
                             end
+                            local scsm = read_shot_camera_shake_move(wd)
+                            if scsm then
+                                entry.shot_camera_shake_move = scsm
+                            end
+                            entry.recoil_anim_enabled = false
+                            entry.recoil_anim_force = 1.0
+                            entry.recoil_anim_speed = 1.0
                             defaults[id] = entry
                         end
                     end
@@ -726,6 +805,18 @@ local function get_equipped_weapon_id_cached()
     cached_eid = get_weapon_id_from_pe(cached_pe)
     cached_frame = frame
     return cached_eid, cached_pe
+end
+
+local function get_recoil_anim_for_key(key)
+    local edit = key and rof_edits[key]
+    if edit and edit.recoil_anim_enabled ~= nil then
+        return edit.recoil_anim_enabled, edit.recoil_anim_force or 1.0, edit.recoil_anim_speed or 1.0
+    end
+    local def = key and rof_defaults[key]
+    if def and def.recoil_anim_enabled ~= nil then
+        return def.recoil_anim_enabled, def.recoil_anim_force or 1.0, def.recoil_anim_speed or 1.0
+    end
+    return false, 1.0, 1.0
 end
 
 local function apply_to_equipped(weapon_key, edit)
@@ -906,36 +997,9 @@ local function get_burst_num_for_equipped()
     return 3
 end
 
-local _cached_cps = nil
-local _rof_shoot_held = false
-local _rof_shoot_held_until = 0
-
-local function read_is_hold()
-    if not _cached_cps then return false end
-    local result = false
-    pcall(function()
-        local hold = _cached_cps:get_field("_IsHold")
-        result = (hold == true)
-    end)
-    return result
-end
-
 re.on_application_entry("UpdateHID", function()
     local pe = get_player_equipment()
     cached_pe = pe
-
-    if pe then
-        local ctx = get_player()
-        if ctx then
-            local go = nil
-            pcall(function() go = ctx:call("get_GameObject") end)
-            if go and TYPE_CameraPosSetting then
-                pcall(function() _cached_cps = go:call("getComponent(System.Type)", TYPE_CameraPosSetting) end)
-            end
-        end
-    else
-        _cached_cps = nil
-    end
 
     -- Smooth Semi-Auto cleanup when disabled
     if not rof_settings.smooth_semi_auto then
@@ -1022,30 +1086,6 @@ re.on_application_entry("UpdateHID", function()
     local rt_down = hk.check_pad_button("RT (R2)", true) or false
     local lmb_down = hk.check_mouse_button("L Mouse", true) or false
     local shoot_held = rt_down or lmb_down
-    if shoot_held then
-        _rof_shoot_held_until = os.clock() + 0.5
-    end
-    _rof_shoot_held = shoot_held or (os.clock() < _rof_shoot_held_until)
-
-    local is_holding_weapon = read_is_hold()
-    if not is_holding_weapon then
-        if smooth_semi.active then
-            smooth_semi.active = false
-            smooth_semi.display_mode = nil
-            smooth_semi.has_fired = false
-            smooth_semi.shoot_held = false
-            pcall(function() pe:set_field("_EquipShotType", 0) end)
-            smooth_semi_set_dss(pe, false)
-        end
-        if smooth_burst.active then
-            smooth_burst.active = false
-            smooth_burst.display_mode = nil
-            smooth_burst.shot_count = 0
-            smooth_burst.shoot_held = false
-            pcall(function() pe:set_field("_EquipShotType", 2) end)
-            smooth_semi_set_dss(pe, false)
-        end
-    end
 
     -- Smooth Semi-Auto (exclude RPG-7)
     if rof_settings.smooth_semi_auto and cur_weapon_id ~= "arm0700" then
@@ -1073,7 +1113,6 @@ re.on_application_entry("UpdateHID", function()
                 smooth_semi.active = false
                 smooth_semi.display_mode = nil
                 smooth_semi.has_fired = false
-                smooth_semi_set_dss(pe, false)
             end
         end
     end
@@ -1104,11 +1143,12 @@ re.on_application_entry("UpdateHID", function()
                 smooth_burst.active = false
                 smooth_burst.display_mode = nil
                 smooth_burst.shot_count = 0
-                smooth_semi_set_dss(pe, false)
             end
         end
     end
 end)
+
+local _bac_apply_override
 
 do
     local equip_td = sdk.find_type_definition("app.PlayerEquipment")
@@ -1136,6 +1176,7 @@ do
                         smooth_semi_set_dss(pending_pe, true)
                         pending_pe = nil
                     end
+                    _bac_apply_override()
                     return retval
                 end
             )
@@ -1154,138 +1195,119 @@ local function get_player_motion()
     return motion
 end
 
-local regrip_action_log = {}
-local regrip_hook_status = "searching..."
-local _rof_debug_action_log = false
-local _rof_debug_mode = false
-local _rof_hook_paused = false
-local _regrip_name_hash = nil
-local _regrip_needs_restore = false
+local function get_player_mfsm2()
+    local ctx = get_player()
+    if not ctx then return nil end
+    local updater = nil
+    pcall(function() updater = ctx:get_field("<Updater>k__BackingField") end)
+    if not updater then return nil end
+    local mfsm2 = nil
+    pcall(function() mfsm2 = updater:get_field("<MotionFsm>k__BackingField") end)
+    return mfsm2
+end
 
-do
-    local cp_type = sdk.find_type_definition("app.Cp_A000Updater")
-    if not cp_type then
-        regrip_hook_status = "app.Cp_A000Updater not found"
-    end
+local function get_body_add_ctrl_layer()
+    local ctx = get_player()
+    if not ctx then return nil, nil end
+    local go = nil
+    pcall(function() go = ctx:call("get_GameObject") end)
+    if not go or not TYPE_BodyAddCtrlDriver then return nil, nil end
+    local driver = nil
+    pcall(function() driver = go:call("getComponent(System.Type)", TYPE_BodyAddCtrlDriver) end)
+    if not driver then return nil, nil end
+    local layer = nil
+    pcall(function() layer = driver:get_field("<Layer>k__BackingField") end)
+    return layer, driver
+end
 
-    local function find_method_in_hierarchy(base_type, method_name)
-        local t = base_type
-        while t do
-            local m = t:get_method(method_name)
-            if m then return m end
-            local methods = t:get_methods()
-            for _, m2 in ipairs(methods) do
-                if m2:get_name() == method_name then return m2 end
-            end
-            t = t:get_parent_type()
+local REGRIP_CONDITION_INDICES = { 0, 10 }
+
+local function set_regrip_condition_enabled(enabled)
+    local ctx = get_player()
+    if not ctx then return false end
+    local ok = false
+    pcall(function()
+        local updater = ctx:get_field("<Updater>k__BackingField")
+        if not updater then return end
+        local input_driver = updater:get_field("<InputDriver>k__BackingField")
+        if not input_driver then return end
+        local reaction = input_driver:get_field("<Reaction>k__BackingField")
+        if not reaction then return end
+        local container = reaction:get_field("<Container>k__BackingField")
+        if not container then return end
+        local resident = container:get_field("<ResidentSettings>k__BackingField")
+        if not resident then return end
+        local settings = resident:get_field("_Settings")
+        if not settings then return end
+        for _, idx in ipairs(REGRIP_CONDITION_INDICES) do
+            pcall(function()
+                local setting = settings:call("get_Item", idx)
+                if not setting then return end
+                local condition = setting:get_field("_Condition")
+                if not condition then return end
+                condition:set_field("_IsEnable", enabled)
+                ok = true
+            end)
         end
-        return nil
+    end)
+    return ok
+end
+
+-- (Motion layer debug variables - kept for UI but inactive unless live logging enabled)
+-- local regrip_action_log = {}
+-- local regrip_hook_status = "searching..."
+local _motion_layer_dump = nil
+local _motion_live_logging = false
+local _fsm_hash_log = {}
+local _FSM_LOG_MAX = 30
+local _action_hash_log = {}
+local _ACTION_LOG_MAX = 30
+
+_bac_apply_override = function()
+    local eid = cached_eid
+    if not eid then
+        eid = get_equipped_weapon_id_cached()
     end
+    if not eid then return end
+    local enabled, force, speed = get_recoil_anim_for_key(eid)
+    if not enabled then return end
+    local layer = nil
+    pcall(function() layer = get_body_add_ctrl_layer() end)
+    if layer then
+        pcall(function()
+            layer:call("set_BlendRate", force)
+            layer:call("set_Speed", speed)
+        end)
+    end
+end
 
-    if cp_type then
-        local req_method = find_method_in_hierarchy(cp_type, "requestTransitionFsmNode")
-        if req_method then
-            regrip_hook_status = "hooked requestTransitionFsmNode"
+local _cached_gui_gameobj = nil
 
-            sdk.hook(req_method,
+local _ui2021_td = sdk.find_type_definition("app.UI2021GuiBehavior")
+if _ui2021_td then
+    local _ui2021_hooked = false
+    for _, mname in ipairs({"update", "lateUpdate", "onEnable", "doAwake", "doEnable"}) do
+        if _ui2021_hooked then break end
+        local meth = _ui2021_td:get_method(mname)
+        if meth then
+            sdk.hook(meth,
                 function(args)
-                    if _rof_hook_paused then return end
-
-                    local found_hash = nil
-                    local hash_obj = nil
-                    for i = 3, 5 do
-                        if args[i] then
-                            pcall(function()
-                                local obj = sdk.to_managed_object(args[i])
-                                if obj then
-                                    local h = nil
-                                    pcall(function() h = obj:call("get_Hash") end)
-                                    if h and not found_hash then
-                                        found_hash = h
-                                        hash_obj = obj
-                                    end
+                    if not _cached_gui_gameobj then
+                        pcall(function()
+                            local obj = sdk.to_managed_object(args[2])
+                            if obj then
+                                local go = obj:call("get_GameObject")
+                                if go and tostring(go:call("get_Name")) == "Gui_ui2021" then
+                                    _cached_gui_gameobj = go
                                 end
-                            end)
-                        end
+                            end
+                        end)
                     end
-
-                    if found_hash and tostring(found_hash) == "3980252629" and not _regrip_name_hash then
-                        _regrip_name_hash = hash_obj
-                        if _rof_debug_action_log then
-                            regrip_action_log[#regrip_action_log + 1] = ">> CAPTURED NameHash obj for 3980252629"
-                        end
-                    end
-
-                    if _rof_debug_action_log and found_hash then
-                        if #regrip_action_log >= 40 then table.remove(regrip_action_log, 1) end
-                        regrip_action_log[#regrip_action_log + 1] = "hash:" .. tostring(found_hash)
-                    end
-
-                    if not disable_regrip then return end
-                    local is_hold = read_is_hold()
-                    if not is_hold then return end
-
-                    if found_hash and tostring(found_hash) == "3980252629" and _rof_shoot_held then
-                        _regrip_needs_restore = true
-                        if _rof_debug_action_log then
-                            regrip_action_log[#regrip_action_log + 1] = ">> BLOCKED: hash:3980252629"
-                        end
-                        return sdk.PreHookResult.SKIP_ORIGINAL
-                    end
+                    return sdk.PreHookResult.CALL_ORIGINAL
                 end,
                 function(retval) return retval end
             )
-
-            local _prev_smooth_semi_active = false
-            re.on_application_entry("UpdateBehavior", function()
-                if not disable_regrip then return end
-
-                local semi_active = smooth_semi.active
-                local just_deactivated = _prev_smooth_semi_active and not semi_active
-                _prev_smooth_semi_active = semi_active
-
-                local should_restore = (_regrip_needs_restore and not _rof_shoot_held) or just_deactivated
-
-                if should_restore and _regrip_name_hash then
-                    local ok, err = pcall(function()
-                        local char_mgr = _cached_char_mgr or sdk.get_managed_singleton("app.CharacterManager")
-                        if char_mgr then
-                            local ctx = char_mgr:call("getPlayerContextRef")
-                            if ctx then
-                                local upd = ctx:call("get_Updater")
-                                if upd then
-                                    upd:call("requestTransitionFsmNode", _regrip_name_hash, nil, nil)
-                                    if _rof_debug_action_log then
-                                        regrip_action_log[#regrip_action_log + 1] = ">> RE-INJECTED: hash:3980252629"
-                                    end
-                                else
-                                    if _rof_debug_action_log then
-                                        regrip_action_log[#regrip_action_log + 1] = ">> RESTORE FAIL: no updater"
-                                    end
-                                end
-                            else
-                                if _rof_debug_action_log then
-                                    regrip_action_log[#regrip_action_log + 1] = ">> RESTORE FAIL: no ctx"
-                                end
-                            end
-                        else
-                            if _rof_debug_action_log then
-                                regrip_action_log[#regrip_action_log + 1] = ">> RESTORE FAIL: no char_mgr"
-                            end
-                        end
-                    end)
-                    if not ok and _rof_debug_action_log then
-                        regrip_action_log[#regrip_action_log + 1] = ">> RESTORE ERROR: " .. tostring(err)
-                    end
-                    _regrip_needs_restore = false
-                elseif should_restore and not _regrip_name_hash then
-                    if _rof_debug_action_log then
-                        regrip_action_log[#regrip_action_log + 1] = ">> RESTORE SKIP: no NameHash captured yet"
-                    end
-                end
-            end)
-        else
-            regrip_hook_status = "requestTransitionFsmNode not found"
+            _ui2021_hooked = true
         end
     end
 end
@@ -1297,13 +1319,24 @@ local function apply_all_now()
     return count
 end
 
+local _regrip_condition_applied = false
+
 re.on_pre_application_entry("LockScene", function()
-    if has_applied then return end
+    if has_applied and _regrip_condition_applied then return end
     if not sdk.get_primary_camera() then
         has_applied = false
+        _regrip_condition_applied = false
+        _cached_gui_gameobj = nil
         return
     end
-    if apply_edits() > 0 then has_applied = true end
+    if not has_applied then
+        if apply_edits() > 0 then has_applied = true end
+    end
+    if not _regrip_condition_applied and disable_regrip then
+        if set_regrip_condition_enabled(false) then
+            _regrip_condition_applied = true
+        end
+    end
 end)
 
 local sm_type = sdk.find_type_definition("via.SceneManager")
@@ -1312,9 +1345,18 @@ if sm_type then
     if m then
         sdk.hook(m,
             function() return sdk.PreHookResult.CALL_ORIGINAL end,
-            function(retval) has_applied = false; _cached_cps = nil; return retval end
+            function(retval) has_applied = false; _regrip_condition_applied = false; _cached_gui_gameobj = nil; return retval end
         )
     end
+end
+
+local function is_game_gui_active()
+    if not _cached_gui_gameobj then return false end
+    local ok, drawing = pcall(function()
+        return _cached_gui_gameobj:call("get_Draw")
+    end)
+    if not ok then _cached_gui_gameobj = nil; return false end
+    return drawing == true
 end
 
 re.on_draw_ui(function()
@@ -1390,6 +1432,7 @@ re.on_draw_ui(function()
         end
         imgui.separator()
 
+        if imgui.tree_node("Advanced Options") then
         local acs_changed = false
         acs_changed, ui_state.enable_aim_camera_shake = imgui.checkbox("Enable Aim Camera Shake", ui_state.enable_aim_camera_shake)
         if imgui.is_item_hovered() then
@@ -1402,6 +1445,24 @@ re.on_draw_ui(function()
             ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
         end
 
+        local regrip_changed = false
+        regrip_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Keep disabled to prevent the animation from interrupting shots when using high ROF")
+        end
+        if regrip_changed then
+            rof_settings.disable_regrip = disable_regrip
+            if disable_regrip then
+                if set_regrip_condition_enabled(false) then
+                    _regrip_condition_applied = true
+                end
+            else
+                set_regrip_condition_enabled(true)
+                _regrip_condition_applied = false
+            end
+            save_settings()
+            ui_state.status = "Regrip animation " .. (disable_regrip and "disabled" or "enabled")
+        end
 
         local sf_changed
         sf_changed, rof_settings.disable_select_fire = imgui.checkbox("Disable Select Fire", rof_settings.disable_select_fire)
@@ -1455,11 +1516,108 @@ re.on_draw_ui(function()
             ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
         end
 
-        local dr_changed
-        dr_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Blocks the regrip/re-cock animation between shots for smoother consecutive fire")
+        imgui.tree_pop()
         end
+
+        -- Motion Layers debug UI 
+        -- if imgui.tree_node("Motion Layers") then
+        --     local live_changed
+        --     live_changed, _motion_live_logging = imgui.checkbox("Live Update", _motion_live_logging)
+        --
+        --     local function capture_motion_layers()
+        --         local dump = { layers = {} }
+        --         pcall(function()
+        --             local motion = get_player_motion()
+        --             if motion then
+        --                 local lc = motion:call("getLayerCount")
+        --                 dump.layer_count = lc
+        --                 for li = 0, lc - 1 do
+        --                     pcall(function()
+        --                         local tl = motion:call("getLayer", li)
+        --                         if tl then
+        --                             local info = { layer = li, running = tl:call("get_Running"), tree_empty = tl:call("get_TreeEmpty") }
+        --                             if info.running and not info.tree_empty then
+        --                                 info.blend_mode = tl:call("get_BlendMode")
+        --                                 info.blend_rate = tl:call("get_BlendRate")
+        --                                 info.motion_id = tl:call("get_MotionID")
+        --                                 info.motion_bank_id = tl:call("get_MotionBankID")
+        --                                 info.speed = tl:call("get_Speed")
+        --                                 info.joint_count = tl:call("get_JointCount")
+        --                                 info.animated_joint_count = tl:call("get_AnimatedJointCount")
+        --                                 pcall(function()
+        --                                     local mn = tl:call("get_HighestWeightMotionNode")
+        --                                     if mn then
+        --                                         info.motion_name = mn:call("get_MotionName") or ""
+        --                                     end
+        --                                 end)
+        --                                 pcall(function()
+        --                                     local jd = tl:call("get_JointsData")
+        --                                     if jd then
+        --                                         info.joints_data_type = tostring(jd:get_type_definition():get_full_name())
+        --                                         local len = jd:call("get_Length")
+        --                                         info.joints_data_length = len
+        --                                         local sample = {}
+        --                                         local sample_count = math.min(len, 40)
+        --                                         for si = 0, sample_count - 1 do
+        --                                             sample[#sample + 1] = jd:call("Get", si)
+        --                                         end
+        --                                         info.joints_data_sample = sample
+        --                                     end
+        --                                 end)
+        --                                 pcall(function()
+        --                                     local vc = tl:call("get_ValueCount")
+        --                                     info.value_count = vc
+        --                                 end)
+        --                             end
+        --                             dump.layers[#dump.layers + 1] = info
+        --                         end
+        --                     end)
+        --                 end
+        --             end
+        --         end)
+        --         return dump
+        --     end
+        --
+        --     if _motion_live_logging then
+        --         _motion_layer_dump = capture_motion_layers()
+        --     end
+        --
+        --     imgui.same_line()
+        --     if imgui.button("Snapshot to JSON") then
+        --         _motion_layer_dump = capture_motion_layers()
+        --         json.dump_file(RROF_DIR .. "debug_motion_layers.json", _motion_layer_dump)
+        --     end
+        --
+        --     if _motion_layer_dump then
+        --         for _, l in ipairs(_motion_layer_dump.layers) do
+        --             if l.running and not l.tree_empty then
+        --                 local label = "L" .. l.layer .. " bm=" .. tostring(l.blend_mode) .. " br=" .. string.format("%.2f", l.blend_rate or 0) .. " mot=" .. tostring(l.motion_id) .. " bank=" .. tostring(l.motion_bank_id) .. " " .. (l.motion_name or "")
+        --                 imgui.text(label)
+        --             end
+        --         end
+        --     end
+        --
+        --     if _motion_live_logging and #_fsm_hash_log > 0 then
+        --         imgui.spacing()
+        --         imgui.text_colored("FSM Transition Hashes:", 0xFFFFFF00)
+        --         for i = #_fsm_hash_log, math.max(1, #_fsm_hash_log - 14), -1 do
+        --             imgui.text(_fsm_hash_log[i])
+        --         end
+        --         if imgui.button("Clear FSM Log") then _fsm_hash_log = {} end
+        --     end
+        --
+        --     if _motion_live_logging and #_action_hash_log > 0 then
+        --         imgui.spacing()
+        --         imgui.text_colored("Action Hashes (execAction):", 0xFF00FFFF)
+        --         for i = #_action_hash_log, math.max(1, #_action_hash_log - 14), -1 do
+        --             imgui.text(_action_hash_log[i])
+        --         end
+        --         if imgui.button("Clear Action Log") then _action_hash_log = {} end
+        --     end
+        --
+        --     imgui.tree_pop()
+        -- end
+
         imgui.separator()
 
         local equipped_key, pe = get_equipped_weapon_id_cached()
@@ -1511,6 +1669,30 @@ re.on_draw_ui(function()
             populate_ui_from_vals(vals, key)
         end
 
+        do
+            local key = dropdown_items[selected_index]
+            if key then
+                local edit = rof_edits[key]
+                if not edit then edit = {}; rof_edits[key] = edit end
+                if edit.allow_semi == nil then edit.allow_semi = true end
+                if edit.allow_full == nil then edit.allow_full = true end
+                if edit.allow_burst == nil then edit.allow_burst = true end
+
+                imgui.text_colored("Fire Modes:", 0xFFFFFF00)
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("Select which fire modes are available when cycling with the hotkey")
+                end
+                local sc; sc, edit.allow_semi = imgui.checkbox("Semi##allow", edit.allow_semi)
+                imgui.same_line()
+                local fc; fc, edit.allow_full = imgui.checkbox("Full-Auto##allow", edit.allow_full)
+                imgui.same_line()
+                local bc; bc, edit.allow_burst = imgui.checkbox("Burst##allow", edit.allow_burst)
+                if not edit.allow_semi and not edit.allow_full and not edit.allow_burst then
+                    edit.allow_semi = true
+                end
+            end
+        end
+
         local any_changed = false
         local shoot_idx = math.floor(ui_state.type_of_shoot + 1)
         if shoot_idx < 1 then shoot_idx = 1 end
@@ -1538,35 +1720,97 @@ re.on_draw_ui(function()
         changed, ui_state.recoil_pitch_r = imgui.drag_float("Pitch Max", ui_state.recoil_pitch_r, 0.01, -10.0, 10.0, "%.3f")
         if changed then any_changed = true end
 
-        local key = dropdown_items[selected_index]
-        if key then
-            local edit = rof_edits[key]
-            if not edit then
-                edit = {}
-                rof_edits[key] = edit
-            end
-            if edit.allow_semi == nil then edit.allow_semi = true end
-            if edit.allow_full == nil then edit.allow_full = true end
-            if edit.allow_burst == nil then edit.allow_burst = true end
+        imgui.spacing()
+        imgui.text_colored("Recoil Animation:", 0xFFFFFF00)
+        local bac_layer = get_body_add_ctrl_layer()
+        if bac_layer then
+            local br = 0; pcall(function() br = bac_layer:call("get_BlendRate") end)
+            local spd = 0; pcall(function() spd = bac_layer:call("get_Speed") end)
 
-            imgui.text_colored("Fire Modes:", 0xFFFFFF00)
-            if imgui.is_item_hovered() then
-                imgui.set_tooltip("Select which fire modes are available when cycling with the hotkey")
-            end
-            local sc; sc, edit.allow_semi = imgui.checkbox("Semi##allow", edit.allow_semi)
-            imgui.same_line()
-            local fc; fc, edit.allow_full = imgui.checkbox("Full-Auto##allow", edit.allow_full)
-            imgui.same_line()
-            local bc; bc, edit.allow_burst = imgui.checkbox("Burst##allow", edit.allow_burst)
+            local wkey = dropdown_items[selected_index]
+            local wedit = wkey and rof_edits[wkey]
+            local ra_enabled = wedit and wedit.recoil_anim_enabled or false
+            local ra_force = wedit and wedit.recoil_anim_force or 1.0
+            local ra_speed = wedit and wedit.recoil_anim_speed or 1.0
 
-            if not edit.allow_semi and not edit.allow_full and not edit.allow_burst then
-                edit.allow_semi = true
+            local lock_changed, lock_new = imgui.checkbox("Enable##recoil_anim", ra_enabled)
+            if lock_changed and wkey then
+                if not rof_edits[wkey] then rof_edits[wkey] = {} end
+                rof_edits[wkey].recoil_anim_enabled = lock_new
+                if lock_new then
+                    if not rof_edits[wkey].recoil_anim_force then rof_edits[wkey].recoil_anim_force = br end
+                    if not rof_edits[wkey].recoil_anim_speed then rof_edits[wkey].recoil_anim_speed = spd end
+                end
+                ra_enabled = lock_new
+                ra_force = rof_edits[wkey].recoil_anim_force or 1.0
+                ra_speed = rof_edits[wkey].recoil_anim_speed or 1.0
+            end
+
+            local br_changed, br_new = imgui.drag_float("Recoil Animation Force", ra_force, 0.01, 0.0, 1.0)
+            if br_changed and wkey then
+                if not rof_edits[wkey] then rof_edits[wkey] = {} end
+                rof_edits[wkey].recoil_anim_force = br_new
+                pcall(function() bac_layer:call("set_BlendRate", br_new) end)
+            end
+
+            local spd_changed, spd_new = imgui.drag_float("Recoil Animation Speed", ra_speed, 0.1, 0.0, 100.0)
+            if spd_changed and wkey then
+                if not rof_edits[wkey] then rof_edits[wkey] = {} end
+                rof_edits[wkey].recoil_anim_speed = spd_new
+                pcall(function() bac_layer:call("set_Speed", spd_new) end)
+            end
+        else
+            imgui.text("(not found)")
+        end
+
+        imgui.spacing()
+        imgui.text_colored("Shot Camera Shake:", 0xFFFFFF00)
+        do
+            local wkey = dropdown_items[selected_index]
+            local wd = wkey and find_weapon_data_by_key(wkey)
+            local move = wd and resolve_shot_camera_shake_move(wd)
+            if move then
+                local move_type = move:get_type_definition()
+                local axes = {
+                    { label = "Translation X", field = "_TranslationXRange", sk = "tx_s", rk = "tx_r" },
+                    { label = "Translation Y", field = "_TranslationYRange", sk = "ty_s", rk = "ty_r" },
+                    { label = "Translation Z", field = "_TranslationZRange", sk = "tz_s", rk = "tz_r" },
+                }
+                local scsm_changed = false
+                for _, axis in ipairs(axes) do
+                    local range_val = try_field(move, axis.field)
+                    if range_val then
+                        local mn = tonumber(range_val.s) or 0
+                        local mx = tonumber(range_val.r) or 0
+                        local c1, new_min = imgui.drag_float(axis.label .. " Min", mn, 0.001, -10.0, 10.0, "%.4f")
+                        local c2, new_max = imgui.drag_float(axis.label .. " Max", mx, 0.001, -10.0, 10.0, "%.4f")
+                        if c1 or c2 then
+                            range_val.s = c1 and new_min or mn
+                            range_val.r = c2 and new_max or mx
+                            local f = move_type:get_field(axis.field)
+                            if f then
+                                write_valuetype(move, f:get_offset_from_base(), range_val)
+                            end
+                            scsm_changed = true
+                        end
+                    else
+                        imgui.text(axis.label .. ": not found")
+                    end
+                end
+                if scsm_changed and wkey then
+                    local edit = rof_edits[wkey]
+                    if not edit then edit = {}; rof_edits[wkey] = edit end
+                    edit.shot_camera_shake_move = read_shot_camera_shake_move(wd)
+                end
+            else
+                imgui.text("No ShotCameraShakeParam._Move found")
             end
         end
 
         if any_changed then
             local key = dropdown_items[selected_index]
             if key then
+                local prev = rof_edits[key]
                 local edit = {
                     TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5),
                     ShotInterval = ui_state.shot_interval,
@@ -1578,7 +1822,11 @@ re.on_draw_ui(function()
                         yaw_r = ui_state.recoil_yaw_r,
                         pitch_s = ui_state.recoil_pitch_s,
                         pitch_r = ui_state.recoil_pitch_r,
-                    }
+                    },
+                    shot_camera_shake_move = prev and prev.shot_camera_shake_move or nil,
+                    recoil_anim_enabled = prev and prev.recoil_anim_enabled or nil,
+                    recoil_anim_force = prev and prev.recoil_anim_force or nil,
+                    recoil_anim_speed = prev and prev.recoil_anim_speed or nil
                 }
                 rof_edits[key] = edit
                 apply_all_now()
@@ -1590,11 +1838,11 @@ re.on_draw_ui(function()
             end
         end
 
-        -- if imgui.button("Capture Defaults") then
-        --   local defaults = capture_defaults()
-        --   local n = 0; for _ in pairs(defaults) do n = n + 1 end
-        --   ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
-        -- end
+        if imgui.button("Capture Defaults") then
+          local defaults = capture_defaults()
+          local n = 0; for _ in pairs(defaults) do n = n + 1 end
+          ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
+        end
 
         if imgui.button("Reset Current Weapon") then
             local key = dropdown_items[selected_index]
@@ -1611,7 +1859,18 @@ re.on_draw_ui(function()
                         yaw_r = def.recoil.yaw_r,
                         pitch_s = def.recoil.pitch_s,
                         pitch_r = def.recoil.pitch_r,
-                    } or nil
+                    } or nil,
+                    shot_camera_shake_move = def.shot_camera_shake_move and {
+                        tx_s = def.shot_camera_shake_move.tx_s,
+                        tx_r = def.shot_camera_shake_move.tx_r,
+                        ty_s = def.shot_camera_shake_move.ty_s,
+                        ty_r = def.shot_camera_shake_move.ty_r,
+                        tz_s = def.shot_camera_shake_move.tz_s,
+                        tz_r = def.shot_camera_shake_move.tz_r,
+                    } or nil,
+                    recoil_anim_enabled = def.recoil_anim_enabled or false,
+                    recoil_anim_force = def.recoil_anim_force or 1.0,
+                    recoil_anim_speed = def.recoil_anim_speed or 1.0
                 }
                 populate_ui_from_vals(def, key)
                 apply_all_now()
@@ -1635,7 +1894,18 @@ re.on_draw_ui(function()
                         yaw_r = def.recoil.yaw_r,
                         pitch_s = def.recoil.pitch_s,
                         pitch_r = def.recoil.pitch_r,
-                    } or nil
+                    } or nil,
+                    shot_camera_shake_move = def.shot_camera_shake_move and {
+                        tx_s = def.shot_camera_shake_move.tx_s,
+                        tx_r = def.shot_camera_shake_move.tx_r,
+                        ty_s = def.shot_camera_shake_move.ty_s,
+                        ty_r = def.shot_camera_shake_move.ty_r,
+                        tz_s = def.shot_camera_shake_move.tz_s,
+                        tz_r = def.shot_camera_shake_move.tz_r,
+                    } or nil,
+                    recoil_anim_enabled = def.recoil_anim_enabled or false,
+                    recoil_anim_force = def.recoil_anim_force or 1.0,
+                    recoil_anim_speed = def.recoil_anim_speed or 1.0
                 }
                 if def.EnableAimCameraShake ~= nil then
                     ui_state.enable_aim_camera_shake = def.EnableAimCameraShake
@@ -1686,6 +1956,12 @@ re.on_draw_ui(function()
             save_settings()
         end
 
+        local always_changed, always_new = imgui.checkbox("Always Show (when HUD active)", rof_settings.overlay_always_show)
+        if always_changed then
+            rof_settings.overlay_always_show = always_new
+            save_settings()
+        end
+
         imgui.separator()
         imgui.text_colored("Hotkeys:", 0xFFFFFF00)
         local changed = false
@@ -1729,126 +2005,6 @@ re.on_draw_ui(function()
         --     imgui.tree_pop()
         -- end
 
-        imgui.separator()
-        local dbg_changed
-        dbg_changed, _rof_debug_mode = imgui.checkbox("Debug Mode", _rof_debug_mode)
-        if dbg_changed and not _rof_debug_mode then
-            _rof_debug_action_log = false
-            regrip_action_log = {}
-        end
-
-        if _rof_debug_mode then
-            if imgui.tree_node("Debug: Animation Hash Log") then
-                local log_changed
-                log_changed, _rof_debug_action_log = imgui.checkbox("Enable Logging", _rof_debug_action_log)
-                if log_changed and not _rof_debug_action_log then
-                    regrip_action_log = {}
-                end
-                _, _rof_hook_paused = imgui.checkbox("Pause Hook", _rof_hook_paused)
-                imgui.text("Hook: " .. regrip_hook_status)
-                local block_active = disable_regrip and not _rof_hook_paused and read_is_hold() and _rof_shoot_held
-                imgui.text("Blocking: " .. tostring(block_active))
-                imgui.text("  disable_regrip: " .. tostring(disable_regrip))
-                imgui.text("  hook_paused: " .. tostring(_rof_hook_paused))
-                imgui.text("  _IsHold: " .. tostring(read_is_hold()))
-                imgui.text("  shoot_held: " .. tostring(_rof_shoot_held))
-                imgui.text("  needs_restore: " .. tostring(_regrip_needs_restore))
-                imgui.text("  name_hash_captured: " .. tostring(_regrip_name_hash ~= nil))
-                local dss_val = "?"
-                pcall(function()
-                    local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
-                    if char_mgr then
-                        local ctx = char_mgr:call("get_PlayerContextFast")
-                        if ctx then
-                            local updater = ctx:call("get_Updater")
-                            local gun = updater and updater:call("get_EquipWeapon")
-                            if gun then
-                                local v = gun:get_field("<DisableShootState>k__BackingField")
-                                dss_val = tostring(v)
-                            else
-                                dss_val = "no gun"
-                            end
-                        end
-                    end
-                end)
-                imgui.text("DisableShootState: " .. dss_val)
-                imgui.text("smooth_semi.active: " .. tostring(smooth_semi.active))
-                imgui.text("_IsHold (live): " .. tostring(read_is_hold()))
-                local diag = {}
-                pcall(function()
-                    local ctx = get_player()
-                    diag[#diag+1] = "ctx: " .. tostring(ctx ~= nil)
-                    if ctx then
-                        local go = nil
-                        pcall(function() go = ctx:call("get_GameObject") end)
-                        diag[#diag+1] = "go: " .. tostring(go ~= nil)
-                        if go and TYPE_CameraPosSetting then
-                            local cps = nil
-                            pcall(function() cps = go:call("getComponent(System.Type)", TYPE_CameraPosSetting) end)
-                            diag[#diag+1] = "cps: " .. tostring(cps ~= nil)
-                            if cps then
-                                local hold = nil
-                                pcall(function() hold = cps:get_field("_IsHold") end)
-                                diag[#diag+1] = "_IsHold: " .. tostring(hold)
-                            end
-                        end
-                        diag[#diag+1] = "TYPE_CPS: " .. tostring(TYPE_CameraPosSetting ~= nil)
-                    end
-                    diag[#diag+1] = "pe: " .. tostring(cached_pe ~= nil)
-                end)
-                for _, d in ipairs(diag) do
-                    imgui.text("  " .. d)
-                end
-                imgui.text("cached_eid: " .. tostring(cached_eid))
-                if imgui.button("Clear") then regrip_action_log = {} end
-                for _, entry in ipairs(regrip_action_log) do
-                    imgui.text(entry)
-                end
-                imgui.separator()
-                if imgui.button("Dump Cp_A000Updater Methods") then
-                    local lines = {}
-                    local cp_td = sdk.find_type_definition("app.Cp_A000Updater")
-                    local t = cp_td
-                    while t do
-                        local methods = t:get_methods()
-                        for _, m in ipairs(methods) do
-                            lines[#lines + 1] = t:get_full_name() .. ": " .. m:get_name()
-                        end
-                        t = t:get_parent_type()
-                    end
-                    json.dump_file("RROF/debug_cp_methods.txt", lines)
-                end
-                if imgui.button("Dump PlayerGun Methods") then
-                    local lines = {}
-                    pcall(function()
-                        local ctx = get_player()
-                        if ctx then
-                            local upd = ctx:call("get_Updater")
-                            local gun = upd and upd:call("get_EquipWeapon")
-                            if gun then
-                                local gun_td = gun:get_type_definition()
-                                local t = gun_td
-                                while t do
-                                    local methods = t:get_methods()
-                                    for _, m in ipairs(methods) do
-                                        lines[#lines + 1] = t:get_full_name() .. ": " .. m:get_name()
-                                    end
-                                    t = t:get_parent_type()
-                                end
-                            end
-                        end
-                    end)
-                    json.dump_file("RROF/debug_gun_methods.txt", lines)
-                end
-                imgui.tree_pop()
-            end
-        end
-
-        imgui.separator()
-        imgui.text("v1.3 -")
-        imgui.same_line(0, 0)
-        imgui.text_colored("ErwinGunsmith", 0xFF38A880)
-
         imgui.tree_pop()
     end
 end)
@@ -1856,6 +2012,8 @@ end)
 local fire_mode_display_timer = 0
 local fire_mode_display_duration = 2.0
 local last_displayed_mode = nil
+local gui_became_active_at = 0
+local gui_was_active = false
 local sm_singleton = sdk.get_native_singleton("via.SceneManager")
 local sm_typedef = sdk.find_type_definition("via.SceneManager")
 local sv_typedef = sdk.find_type_definition("via.SceneView")
@@ -1877,7 +2035,13 @@ re.on_frame(function()
         last_displayed_mode = current
     end
 
-    if os.clock() - fire_mode_display_timer > fire_mode_display_duration then return end
+    local gui_active_now = rof_settings.overlay_always_show and is_game_gui_active()
+    if gui_active_now and not gui_was_active then
+        gui_became_active_at = os.clock()
+    end
+    gui_was_active = gui_active_now
+    local always_on = gui_active_now and (os.clock() - gui_became_active_at >= 0.1)
+    if not always_on and os.clock() - fire_mode_display_timer > fire_mode_display_duration then return end
 
     local dot_count = 0
     if current == 0 then dot_count = 1
@@ -1893,36 +2057,59 @@ re.on_frame(function()
     end)
     if not size then return end
 
-    local rect_w = 16.0
-    local rect_h = 6.0
-    local circle_r = 5.0
-    local spacing = 20.0
-
-    local item_w = rof_settings.overlay_use_rects and rect_w or (circle_r * 2)
-    local item_h = rof_settings.overlay_use_rects and rect_h or (circle_r * 2)
-
-    local total_width = (dot_count - 1) * spacing + item_w
-    local win_w = total_width + 20
-    local win_h = item_h + 20
-
-    local pos_x = size.w - win_w - 130
-    local pos_y = size.h - win_h - 20
-
-    imgui.set_next_window_pos({pos_x, pos_y}, 3, {0, 0})
-    imgui.set_next_window_size({win_w, win_h}, 3)
-    imgui.begin_window("##FireModeOverlay", true, 129)
-
-    local draw_list_x = 10
-    local draw_list_y = 10
-    for i = 0, dot_count - 1 do
-        local cx = draw_list_x + (i * spacing)
-        local cy = draw_list_y
-        if rof_settings.overlay_use_rects then
-            draw.filled_rect(pos_x + cx, pos_y + cy, rect_w, rect_h, 0x66FFFFFF)
-        else
-            draw.filled_circle(pos_x + cx + circle_r, pos_y + cy + circle_r, circle_r, 0x66FFFFFF, 16)
+    if rof_settings.overlay_style == 3 then
+        local label = ""
+        if current == 0 then label = "SEMI-AUTO"
+        elseif current == 2 then label = "BURST-FIRE"
+        elseif current == 1 then label = "FULL-AUTO"
         end
-    end
+        if label == "" then return end
 
-    imgui.end_window()
+        local text_size = imgui.calc_text_size(label)
+        local pad_x, pad_y = 12, 8
+        local win_w = text_size.x + pad_x * 2
+        local win_h = text_size.y + pad_y * 2
+
+        local pos_x = size.w - win_w - 130
+        local pos_y = size.h - win_h - 20
+
+        imgui.set_next_window_pos({pos_x, pos_y}, 3, {0, 0})
+        imgui.set_next_window_size({win_w, win_h}, 3)
+        imgui.begin_window("##FireModeOverlay", true, 129)
+        imgui.text_colored(label, 0x66FFFFFF)
+        imgui.end_window()
+    else
+        local rect_w = 16.0
+        local rect_h = 6.0
+        local circle_r = 5.0
+        local spacing = 20.0
+
+        local item_w = rof_settings.overlay_use_rects and rect_w or (circle_r * 2)
+        local item_h = rof_settings.overlay_use_rects and rect_h or (circle_r * 2)
+
+        local total_width = (dot_count - 1) * spacing + item_w
+        local win_w = total_width + 20
+        local win_h = item_h + 20
+
+        local pos_x = size.w - win_w - 130
+        local pos_y = size.h - win_h - 20
+
+        imgui.set_next_window_pos({pos_x, pos_y}, 3, {0, 0})
+        imgui.set_next_window_size({win_w, win_h}, 3)
+        imgui.begin_window("##FireModeOverlay", true, 129)
+
+        local draw_list_x = 10
+        local draw_list_y = 10
+        for i = 0, dot_count - 1 do
+            local cx = draw_list_x + (i * spacing)
+            local cy = draw_list_y
+            if rof_settings.overlay_use_rects then
+                draw.filled_rect(pos_x + cx, pos_y + cy, rect_w, rect_h, 0x66FFFFFF)
+            else
+                draw.filled_circle(pos_x + cx + circle_r, pos_y + cy + circle_r, circle_r, 0x66FFFFFF, 16)
+            end
+        end
+
+        imgui.end_window()
+    end
 end)
