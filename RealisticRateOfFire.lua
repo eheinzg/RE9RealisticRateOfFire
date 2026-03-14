@@ -16,6 +16,7 @@ local rof_settings_defaults = {
     smooth_semi_auto = true,
     smooth_burst = true,
     enable_aim_camera_shake = true,
+    enable_recoil_anim_override = true,
     show_fire_mode_overlay = true,
     fire_mode_limit_semi_full = false,
     overlay_use_rects = true,
@@ -807,6 +808,18 @@ local function get_equipped_weapon_id_cached()
     return cached_eid, cached_pe
 end
 
+local _any_recoil_anim_enabled = false
+local function refresh_any_recoil_anim()
+    for _, edit in pairs(rof_edits) do
+        if edit.recoil_anim_enabled then
+            _any_recoil_anim_enabled = true
+            return
+        end
+    end
+    _any_recoil_anim_enabled = false
+end
+refresh_any_recoil_anim()
+
 local function get_recoil_anim_for_key(key)
     local edit = key and rof_edits[key]
     if edit and edit.recoil_anim_enabled ~= nil then
@@ -1206,6 +1219,8 @@ local function get_player_mfsm2()
     return mfsm2
 end
 
+local _cached_bac_driver = nil
+
 local function get_body_add_ctrl_layer()
     local ctx = get_player()
     if not ctx then return nil, nil end
@@ -1215,6 +1230,7 @@ local function get_body_add_ctrl_layer()
     local driver = nil
     pcall(function() driver = go:call("getComponent(System.Type)", TYPE_BodyAddCtrlDriver) end)
     if not driver then return nil, nil end
+    _cached_bac_driver = driver
     local layer = nil
     pcall(function() layer = driver:get_field("<Layer>k__BackingField") end)
     return layer, driver
@@ -1264,6 +1280,7 @@ local _action_hash_log = {}
 local _ACTION_LOG_MAX = 30
 
 _bac_apply_override = function()
+    if not rof_settings.enable_recoil_anim_override then return end
     local eid = cached_eid
     if not eid then
         eid = get_equipped_weapon_id_cached()
@@ -1271,8 +1288,7 @@ _bac_apply_override = function()
     if not eid then return end
     local enabled, force, speed = get_recoil_anim_for_key(eid)
     if not enabled then return end
-    local layer = nil
-    pcall(function() layer = get_body_add_ctrl_layer() end)
+    local layer, driver = get_body_add_ctrl_layer()
     if layer then
         pcall(function()
             layer:call("set_BlendRate", force)
@@ -1280,6 +1296,28 @@ _bac_apply_override = function()
         end)
     end
 end
+
+re.on_pre_application_entry("LateUpdateBehavior", function()
+    if not rof_settings.enable_recoil_anim_override then return end
+    if not _any_recoil_anim_enabled then return end
+    local eid = cached_eid
+    if not eid then
+        pcall(function()
+            local pe = get_player_equipment()
+            if pe then eid = get_weapon_id_from_pe(pe) end
+        end)
+    end
+    if not eid then return end
+    local enabled, force, speed = get_recoil_anim_for_key(eid)
+    if not enabled then return end
+    local layer = get_body_add_ctrl_layer()
+    if layer then
+        pcall(function()
+            layer:call("set_BlendRate", force)
+            layer:call("set_Speed", speed)
+        end)
+    end
+end)
 
 local _cached_gui_gameobj = nil
 
@@ -1327,6 +1365,7 @@ re.on_pre_application_entry("LockScene", function()
         has_applied = false
         _regrip_condition_applied = false
         _cached_gui_gameobj = nil
+        _cached_bac_driver = nil
         return
     end
     if not has_applied then
@@ -1345,7 +1384,7 @@ if sm_type then
     if m then
         sdk.hook(m,
             function() return sdk.PreHookResult.CALL_ORIGINAL end,
-            function(retval) has_applied = false; _regrip_condition_applied = false; _cached_gui_gameobj = nil; return retval end
+            function(retval) has_applied = false; _regrip_condition_applied = false; _cached_gui_gameobj = nil; _cached_bac_driver = nil; return retval end
         )
     end
 end
@@ -1376,6 +1415,7 @@ re.on_draw_ui(function()
                 local pname = profile_state.names[profile_state.selected]
                 if pname and load_profile(pname) then
                     apply_all_now()
+                    refresh_any_recoil_anim()
                     for k, edit in pairs(rof_edits) do
                         apply_to_equipped(k, edit)
                     end
@@ -1472,6 +1512,25 @@ re.on_draw_ui(function()
         if sf_changed then
             save_settings()
             ui_state.status = "Select fire " .. (rof_settings.disable_select_fire and "disabled" or "enabled")
+        end
+
+        local rao_changed
+        rao_changed, rof_settings.enable_recoil_anim_override = imgui.checkbox("Enable Recoil Animation Override", rof_settings.enable_recoil_anim_override)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Master switch for per-weapon Recoil Animation Force/Speed overrides")
+        end
+        if rao_changed then
+            if not rof_settings.enable_recoil_anim_override then
+                pcall(function()
+                    local layer = get_body_add_ctrl_layer()
+                    if layer then
+                        layer:call("set_BlendRate", 1.0)
+                        layer:call("set_Speed", 1.0)
+                    end
+                end)
+            end
+            save_settings()
+            ui_state.status = "Recoil animation override " .. (rof_settings.enable_recoil_anim_override and "enabled" or "disabled")
         end
 
         local ssa_changed
@@ -1720,6 +1779,7 @@ re.on_draw_ui(function()
         changed, ui_state.recoil_pitch_r = imgui.drag_float("Pitch Max", ui_state.recoil_pitch_r, 0.01, -10.0, 10.0, "%.3f")
         if changed then any_changed = true end
 
+        if rof_settings.enable_recoil_anim_override then
         imgui.spacing()
         imgui.text_colored("Recoil Animation:", 0xFFFFFF00)
         local bac_layer = get_body_add_ctrl_layer()
@@ -1744,6 +1804,7 @@ re.on_draw_ui(function()
                 ra_enabled = lock_new
                 ra_force = rof_edits[wkey].recoil_anim_force or 1.0
                 ra_speed = rof_edits[wkey].recoil_anim_speed or 1.0
+                refresh_any_recoil_anim()
             end
 
             local br_changed, br_new = imgui.drag_float("Recoil Animation Force", ra_force, 0.01, 0.0, 1.0)
@@ -1761,6 +1822,7 @@ re.on_draw_ui(function()
             end
         else
             imgui.text("(not found)")
+        end
         end
 
         imgui.spacing()
@@ -1874,6 +1936,7 @@ re.on_draw_ui(function()
                 }
                 populate_ui_from_vals(def, key)
                 apply_all_now()
+                refresh_any_recoil_anim()
                 ui_state.status = "Reset " .. (WEAPON_NAMES[key] or key) .. " to defaults"
             elseif key then
                 ui_state.status = "No defaults saved for " .. (WEAPON_NAMES[key] or key) .. " (capture first)"
@@ -1913,6 +1976,7 @@ re.on_draw_ui(function()
                 count = count + 1
             end
             apply_all_now()
+            refresh_any_recoil_anim()
             local key = dropdown_items[selected_index]
             if key then
                 populate_ui_from_vals(rof_defaults[key], key)
@@ -2060,7 +2124,7 @@ re.on_frame(function()
     if rof_settings.overlay_style == 3 then
         local label = ""
         if current == 0 then label = "SEMI-AUTO"
-        elseif current == 2 then label = "BURST-FIRE"
+        elseif current == 2 then label = "BURST"
         elseif current == 1 then label = "FULL-AUTO"
         end
         if label == "" then return end
