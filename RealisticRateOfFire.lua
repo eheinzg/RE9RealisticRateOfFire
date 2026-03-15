@@ -8,20 +8,19 @@ local ROF_HOTKEYS_PATH = RROF_DIR .. "hotkeys.json"
 local SETTINGS_PATH = RROF_DIR .. "settings.json"
 local rof_edits = {}
 local rof_defaults = {}
-local has_applied = false
+local has_applied = false 
 
 local rof_settings_defaults = {
-    disable_regrip = false,
-    disable_select_fire = true,
+    disable_select_fire = false,
     smooth_semi_auto = true,
     smooth_burst = true,
     enable_aim_camera_shake = true,
     enable_recoil_anim_override = true,
     show_fire_mode_overlay = true,
     fire_mode_limit_semi_full = false,
-    overlay_use_rects = true,
-    overlay_style = 1,
-    overlay_always_show = false,
+    overlay_use_rects = false,
+    overlay_style = 3,
+    overlay_always_show = true,
 }
 local rof_settings = {}
 do
@@ -51,8 +50,6 @@ if rof_settings.overlay_style == nil or rof_settings.overlay_style == 1 then
 end
 
 local OVERLAY_STYLES = { "None", "Circles", "Rectangles", "Text" }
-
-local disable_regrip = true
 
 local WEAPON_NAMES = {
     ["arm0000"] = "Matilda IMP",
@@ -1236,39 +1233,6 @@ local function get_body_add_ctrl_layer()
     return layer, driver
 end
 
-local REGRIP_CONDITION_INDICES = { 0, 10 }
-
-local function set_regrip_condition_enabled(enabled)
-    local ctx = get_player()
-    if not ctx then return false end
-    local ok = false
-    pcall(function()
-        local updater = ctx:get_field("<Updater>k__BackingField")
-        if not updater then return end
-        local input_driver = updater:get_field("<InputDriver>k__BackingField")
-        if not input_driver then return end
-        local reaction = input_driver:get_field("<Reaction>k__BackingField")
-        if not reaction then return end
-        local container = reaction:get_field("<Container>k__BackingField")
-        if not container then return end
-        local resident = container:get_field("<ResidentSettings>k__BackingField")
-        if not resident then return end
-        local settings = resident:get_field("_Settings")
-        if not settings then return end
-        for _, idx in ipairs(REGRIP_CONDITION_INDICES) do
-            pcall(function()
-                local setting = settings:call("get_Item", idx)
-                if not setting then return end
-                local condition = setting:get_field("_Condition")
-                if not condition then return end
-                condition:set_field("_IsEnable", enabled)
-                ok = true
-            end)
-        end
-    end)
-    return ok
-end
-
 -- (Motion layer debug variables - kept for UI but inactive unless live logging enabled)
 -- local regrip_action_log = {}
 -- local regrip_hook_status = "searching..."
@@ -1357,24 +1321,16 @@ local function apply_all_now()
     return count
 end
 
-local _regrip_condition_applied = false
-
 re.on_pre_application_entry("LockScene", function()
-    if has_applied and _regrip_condition_applied then return end
+    if has_applied then return end
     if not sdk.get_primary_camera() then
         has_applied = false
-        _regrip_condition_applied = false
         _cached_gui_gameobj = nil
         _cached_bac_driver = nil
         return
     end
     if not has_applied then
         if apply_edits() > 0 then has_applied = true end
-    end
-    if not _regrip_condition_applied and disable_regrip then
-        if set_regrip_condition_enabled(false) then
-            _regrip_condition_applied = true
-        end
     end
 end)
 
@@ -1384,7 +1340,7 @@ if sm_type then
     if m then
         sdk.hook(m,
             function() return sdk.PreHookResult.CALL_ORIGINAL end,
-            function(retval) has_applied = false; _regrip_condition_applied = false; _cached_gui_gameobj = nil; _cached_bac_driver = nil; return retval end
+            function(retval) has_applied = false; _cached_gui_gameobj = nil; _cached_bac_driver = nil; return retval end
         )
     end
 end
@@ -1483,25 +1439,6 @@ re.on_draw_ui(function()
             rof_settings.enable_aim_camera_shake = ui_state.enable_aim_camera_shake
             save_settings()
             ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
-        end
-
-        local regrip_changed = false
-        regrip_changed, disable_regrip = imgui.checkbox("Disable Regrip Animation", disable_regrip)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Keep disabled to prevent the animation from interrupting shots when using high ROF")
-        end
-        if regrip_changed then
-            rof_settings.disable_regrip = disable_regrip
-            if disable_regrip then
-                if set_regrip_condition_enabled(false) then
-                    _regrip_condition_applied = true
-                end
-            else
-                set_regrip_condition_enabled(true)
-                _regrip_condition_applied = false
-            end
-            save_settings()
-            ui_state.status = "Regrip animation " .. (disable_regrip and "disabled" or "enabled")
         end
 
         local sf_changed
