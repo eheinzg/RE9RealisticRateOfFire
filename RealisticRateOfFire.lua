@@ -11,6 +11,7 @@ local rof_defaults = {}
 local has_applied = false 
 
 local rof_settings_defaults = {
+    disable_regrip = true,
     disable_select_fire = false,
     smooth_semi_auto = true,
     smooth_burst = true,
@@ -244,6 +245,7 @@ local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
 local TYPE_WeaponCatalogRegister = sdk.typeof("app.WeaponCatalogRegister")
 local TYPE_Motion = sdk.typeof("via.motion.Motion")
 local TYPE_BodyAddCtrlDriver = sdk.typeof("app.BodyAddCtrlDriver")
+local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
 
 local function try_call(obj, method)
     local r; pcall(function() r = obj:call(method) end); return r
@@ -1218,6 +1220,22 @@ end
 
 local _cached_bac_driver = nil
 
+local function get_player_is_holding()
+    if not TYPE_CameraPosSetting then return false end
+    local ctx = get_player()
+    if not ctx then return false end
+    local holding = false
+    pcall(function()
+        local go = ctx:call("get_GameObject")
+        if not go then return end
+        local cps = go:call("getComponent(System.Type)", TYPE_CameraPosSetting)
+        if not cps then return end
+        local hold = cps:get_field("_IsHold")
+        holding = hold == true
+    end)
+    return holding
+end
+
 local function get_body_add_ctrl_layer()
     local ctx = get_player()
     if not ctx then return nil, nil end
@@ -1243,8 +1261,56 @@ local _FSM_LOG_MAX = 30
 local _action_hash_log = {}
 local _ACTION_LOG_MAX = 30
 
+local REGRIP_CONDITION_INDICES = { 0, 10 }
+
+local function set_regrip_condition_enabled(enabled)
+    local ctx = get_player()
+    if not ctx then return false end
+    local ok = false
+    pcall(function()
+        local updater = ctx:get_field("<Updater>k__BackingField")
+        if not updater then return end
+        local input_driver = updater:get_field("<InputDriver>k__BackingField")
+        if not input_driver then return end
+        local reaction = input_driver:get_field("<Reaction>k__BackingField")
+        if not reaction then return end
+        local container = reaction:get_field("<Container>k__BackingField")
+        if not container then return end
+        local resident = container:get_field("<ResidentSettings>k__BackingField")
+        if not resident then return end
+        local settings = resident:get_field("_Settings")
+        if not settings then return end
+        for _, idx in ipairs(REGRIP_CONDITION_INDICES) do
+            pcall(function()
+                local setting = settings:call("get_Item", idx)
+                if not setting then return end
+                local condition = setting:get_field("_Condition")
+                if not condition then return end
+                condition:set_field("_IsEnable", enabled)
+                ok = true
+            end)
+        end
+    end)
+    return ok
+end
+
+local function get_current_updater_addr()
+    local addr = nil
+    pcall(function()
+        local ctx = get_player()
+        if ctx then
+            local updater = ctx:get_field("<Updater>k__BackingField")
+            if updater then addr = tostring(updater) end
+        end
+    end)
+    return addr
+end
+
+local _regrip_last_updater_addr = nil
+
 _bac_apply_override = function()
     if not rof_settings.enable_recoil_anim_override then return end
+    if not get_player_is_holding() then return end
     local eid = cached_eid
     if not eid then
         eid = get_equipped_weapon_id_cached()
@@ -1262,8 +1328,29 @@ _bac_apply_override = function()
 end
 
 re.on_pre_application_entry("LateUpdateBehavior", function()
+    if rof_settings.disable_regrip then
+        local cur = get_current_updater_addr()
+        if cur and cur ~= _regrip_last_updater_addr then
+            if set_regrip_condition_enabled(false) then
+                _regrip_last_updater_addr = cur
+            end
+        end
+    end
+
     if not rof_settings.enable_recoil_anim_override then return end
     if not _any_recoil_anim_enabled then return end
+
+    if not get_player_is_holding() then
+        local layer = get_body_add_ctrl_layer()
+        if layer then
+            pcall(function()
+                layer:call("set_BlendRate", 1.0)
+                layer:call("set_Speed", 1.0)
+            end)
+        end
+        return
+    end
+
     local eid = cached_eid
     if not eid then
         pcall(function()
@@ -1330,7 +1417,12 @@ re.on_pre_application_entry("LockScene", function()
         return
     end
     if not has_applied then
-        if apply_edits() > 0 then has_applied = true end
+        if apply_edits() > 0 then
+            has_applied = true
+            if rof_settings.disable_regrip then
+                set_regrip_condition_enabled(false)
+            end
+        end
     end
 end)
 
@@ -1340,7 +1432,7 @@ if sm_type then
     if m then
         sdk.hook(m,
             function() return sdk.PreHookResult.CALL_ORIGINAL end,
-            function(retval) has_applied = false; _cached_gui_gameobj = nil; _cached_bac_driver = nil; return retval end
+            function(retval) has_applied = false; _cached_gui_gameobj = nil; _cached_bac_driver = nil; _regrip_last_updater_addr = nil; return retval end
         )
     end
 end
@@ -1441,6 +1533,18 @@ re.on_draw_ui(function()
             ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
         end
 
+        local regrip_changed = false
+        regrip_changed, rof_settings.disable_regrip = imgui.checkbox("Disable Regrip Animation", rof_settings.disable_regrip)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Keep disabled to prevent the animation from interrupting shots when using high ROF")
+        end
+        if regrip_changed then
+            set_regrip_condition_enabled(not rof_settings.disable_regrip)
+            _regrip_last_updater_addr = get_current_updater_addr()
+            save_settings()
+            ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled" or "enabled")
+        end
+
         local sf_changed
         sf_changed, rof_settings.disable_select_fire = imgui.checkbox("Disable Select Fire", rof_settings.disable_select_fire)
         if imgui.is_item_hovered() then
@@ -1469,6 +1573,7 @@ re.on_draw_ui(function()
             save_settings()
             ui_state.status = "Recoil animation override " .. (rof_settings.enable_recoil_anim_override and "enabled" or "disabled")
         end
+        imgui.text("_IsHold: " .. tostring(get_player_is_holding()))
 
         local ssa_changed
         ssa_changed, rof_settings.smooth_semi_auto = imgui.checkbox("Improved Semi-Auto Recoil Animation", rof_settings.smooth_semi_auto)
@@ -1737,6 +1842,11 @@ re.on_draw_ui(function()
                 if lock_new then
                     if not rof_edits[wkey].recoil_anim_force then rof_edits[wkey].recoil_anim_force = br end
                     if not rof_edits[wkey].recoil_anim_speed then rof_edits[wkey].recoil_anim_speed = spd end
+                else
+                    pcall(function()
+                        bac_layer:call("set_BlendRate", 1.0)
+                        bac_layer:call("set_Speed", 1.0)
+                    end)
                 end
                 ra_enabled = lock_new
                 ra_force = rof_edits[wkey].recoil_anim_force or 1.0
@@ -1744,6 +1854,7 @@ re.on_draw_ui(function()
                 refresh_any_recoil_anim()
             end
 
+            if ra_enabled then
             local br_changed, br_new = imgui.drag_float("Recoil Animation Force", ra_force, 0.01, 0.0, 1.0)
             if br_changed and wkey then
                 if not rof_edits[wkey] then rof_edits[wkey] = {} end
@@ -1756,6 +1867,7 @@ re.on_draw_ui(function()
                 if not rof_edits[wkey] then rof_edits[wkey] = {} end
                 rof_edits[wkey].recoil_anim_speed = spd_new
                 pcall(function() bac_layer:call("set_Speed", spd_new) end)
+            end
             end
         else
             imgui.text("(not found)")
@@ -1998,13 +2110,6 @@ re.on_draw_ui(function()
             hk.update_hotkey_table(rof_hk_settings.hotkeys)
             json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
         end
-
-        -- Attachment Catalog Debug (commented out, not needed for normal use)
-        -- imgui.separator()
-        -- if imgui.tree_node("Attachment Catalog Debug") then
-        --     ...
-        --     imgui.tree_pop()
-        -- end
 
         imgui.tree_pop()
     end
