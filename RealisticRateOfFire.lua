@@ -3,7 +3,6 @@
 local RROF_DIR = "RROF/"
 local DEFAULTS_PATH = RROF_DIR .. "defaults.json"
 local PROFILES_DIR = RROF_DIR .. "profiles/"
-local PROFILES_INDEX = RROF_DIR .. "profiles_index.json"
 local ROF_HOTKEYS_PATH = RROF_DIR .. "hotkeys.json"
 local SETTINGS_PATH = RROF_DIR .. "settings.json"
 local rof_edits = {}
@@ -22,6 +21,8 @@ local rof_settings_defaults = {
     overlay_use_rects = false,
     overlay_style = 3,
     overlay_always_show = true,
+    active_profile = "",
+    deleted_profiles = {},
 }
 local rof_settings = {}
 do
@@ -117,24 +118,27 @@ local function sanitize_filename(name)
 end
 
 local function load_profile_index()
-    local ok, data = pcall(json.load_file, PROFILES_INDEX)
-    if ok and data and type(data) == "table" then
-        if data.names and type(data.names) == "table" then
-            table.sort(data.names)
-            profile_state.names = data.names
-            if data.active and type(data.active) == "string" then
-                for i, n in ipairs(profile_state.names) do
-                    if n == data.active then profile_state.selected = i; break end
-                end
+    profile_state.names = {}
+    local deleted = {}
+    if rof_settings.deleted_profiles and type(rof_settings.deleted_profiles) == "table" then
+        for _, p in ipairs(rof_settings.deleted_profiles) do deleted[p] = true end
+    end
+    local ok, paths = pcall(fs.glob, [[RROF\\profiles\\.*]])
+    if ok and paths then
+        local seen = {}
+        for _, path in ipairs(paths) do
+            local name = path:match("RROF[/\\]profiles[/\\]([^/\\]+)%.json$")
+            if name and not seen[name] and not deleted[name] then
+                seen[name] = true
+                profile_state.names[#profile_state.names + 1] = name
             end
-        elseif #data > 0 then
-            table.sort(data)
-            profile_state.names = data
-        else
-            profile_state.names = {}
         end
-    else
-        profile_state.names = {}
+    end
+    table.sort(profile_state.names)
+    if rof_settings.active_profile and type(rof_settings.active_profile) == "string" then
+        for i, n in ipairs(profile_state.names) do
+            if n == rof_settings.active_profile then profile_state.selected = i; break end
+        end
     end
     if profile_state.selected > #profile_state.names then
         profile_state.selected = math.max(1, #profile_state.names)
@@ -142,8 +146,8 @@ local function load_profile_index()
 end
 
 local function save_profile_index()
-    local active_name = profile_state.names[profile_state.selected]
-    pcall(json.dump_file, PROFILES_INDEX, { names = profile_state.names, active = active_name })
+    rof_settings.active_profile = profile_state.names[profile_state.selected] or ""
+    save_settings()
 end
 
 local function save_profile(name)
@@ -152,6 +156,11 @@ local function save_profile(name)
         edits = rof_edits,
     }
     pcall(json.dump_file, PROFILES_DIR .. name .. ".json", data)
+    if rof_settings.deleted_profiles then
+        for i, p in ipairs(rof_settings.deleted_profiles) do
+            if p == name then table.remove(rof_settings.deleted_profiles, i); break end
+        end
+    end
     local found = false
     for _, n in ipairs(profile_state.names) do
         if n == name then found = true; break end
@@ -205,6 +214,14 @@ end
 
 local function delete_profile(name)
     pcall(json.dump_file, PROFILES_DIR .. name .. ".json", {})
+    if not rof_settings.deleted_profiles then rof_settings.deleted_profiles = {} end
+    local already = false
+    for _, p in ipairs(rof_settings.deleted_profiles) do
+        if p == name then already = true; break end
+    end
+    if not already then
+        rof_settings.deleted_profiles[#rof_settings.deleted_profiles + 1] = name
+    end
     for i, n in ipairs(profile_state.names) do
         if n == name then
             table.remove(profile_state.names, i)
@@ -1954,25 +1971,19 @@ re.on_draw_ui(function()
         if any_changed then
             local key = dropdown_items[selected_index]
             if key then
-                local prev = rof_edits[key]
-                local edit = {
-                    TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5),
-                    ShotInterval = ui_state.shot_interval,
-                    BurstShotInterval = ui_state.burst_shot_interval,
-                    BurstNum = math.floor(ui_state.burst_num + 0.5),
-                    recoil = {
-                        rate = ui_state.recoil_rate,
-                        yaw_s = ui_state.recoil_yaw_s,
-                        yaw_r = ui_state.recoil_yaw_r,
-                        pitch_s = ui_state.recoil_pitch_s,
-                        pitch_r = ui_state.recoil_pitch_r,
-                    },
-                    shot_camera_shake_move = prev and prev.shot_camera_shake_move or nil,
-                    recoil_anim_enabled = prev and prev.recoil_anim_enabled or nil,
-                    recoil_anim_force = prev and prev.recoil_anim_force or nil,
-                    recoil_anim_speed = prev and prev.recoil_anim_speed or nil
+                if not rof_edits[key] then rof_edits[key] = {} end
+                local edit = rof_edits[key]
+                edit.TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5)
+                edit.ShotInterval = ui_state.shot_interval
+                edit.BurstShotInterval = ui_state.burst_shot_interval
+                edit.BurstNum = math.floor(ui_state.burst_num + 0.5)
+                edit.recoil = {
+                    rate = ui_state.recoil_rate,
+                    yaw_s = ui_state.recoil_yaw_s,
+                    yaw_r = ui_state.recoil_yaw_r,
+                    pitch_s = ui_state.recoil_pitch_s,
+                    pitch_r = ui_state.recoil_pitch_r,
                 }
-                rof_edits[key] = edit
                 apply_all_now()
                 if apply_to_equipped(key, edit) then
                     ui_state.status = "Applied live: " .. (WEAPON_NAMES[key] or key)
