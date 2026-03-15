@@ -1544,6 +1544,39 @@ re.on_draw_ui(function()
             save_settings()
             ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled" or "enabled")
         end
+        -- do
+        --     local dbg = "updater=" .. tostring(_regrip_last_updater_addr or "(nil)")
+        --     local cond_str = ""
+        --     pcall(function()
+        --         local ctx = get_player()
+        --         if not ctx then cond_str = " (no ctx)"; return end
+        --         local updater = ctx:get_field("<Updater>k__BackingField")
+        --         if not updater then cond_str = " (no updater)"; return end
+        --         local input_driver = updater:get_field("<InputDriver>k__BackingField")
+        --         if not input_driver then cond_str = " (no input_driver)"; return end
+        --         local reaction = input_driver:get_field("<Reaction>k__BackingField")
+        --         if not reaction then cond_str = " (no reaction)"; return end
+        --         local container = reaction:get_field("<Container>k__BackingField")
+        --         if not container then cond_str = " (no container)"; return end
+        --         local resident = container:get_field("<ResidentSettings>k__BackingField")
+        --         if not resident then cond_str = " (no resident)"; return end
+        --         local settings = resident:get_field("_Settings")
+        --         if not settings then cond_str = " (no settings)"; return end
+        --         for _, idx in ipairs(REGRIP_CONDITION_INDICES) do
+        --             pcall(function()
+        --                 local setting = settings:call("get_Item", idx)
+        --                 if setting then
+        --                     local condition = setting:get_field("_Condition")
+        --                     if condition then
+        --                         local val = condition:get_field("_IsEnable")
+        --                         cond_str = cond_str .. " [" .. idx .. "]=" .. tostring(val)
+        --                     end
+        --                 end
+        --             end)
+        --         end
+        --     end)
+        --     --imgui.text("Regrip: " .. dbg .. cond_str)
+        -- end
 
         local sf_changed
         sf_changed, rof_settings.disable_select_fire = imgui.checkbox("Disable Select Fire", rof_settings.disable_select_fire)
@@ -1573,7 +1606,7 @@ re.on_draw_ui(function()
             save_settings()
             ui_state.status = "Recoil animation override " .. (rof_settings.enable_recoil_anim_override and "enabled" or "disabled")
         end
-        imgui.text("_IsHold: " .. tostring(get_player_is_holding()))
+        -- imgui.text("_IsHold: " .. tostring(get_player_is_holding()))
 
         local ssa_changed
         ssa_changed, rof_settings.smooth_semi_auto = imgui.checkbox("Improved Semi-Auto Recoil Animation", rof_settings.smooth_semi_auto)
