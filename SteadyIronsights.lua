@@ -161,7 +161,7 @@ local function set_cover_offset(weapon_key, cover_state, x, y, z)
     save_cover_offsets()
 end
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = false, ha_breath_duration = 0, enable_aim_camera_shake = true, zero_min_fit_rate = false }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = false, ha_breath_duration = 0, enable_aim_camera_shake = true, zero_min_fit_rate = false, perfect_focus = false }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
@@ -176,6 +176,7 @@ do
         if saved.ha_breath_duration ~= nil then prefs.ha_breath_duration = saved.ha_breath_duration end
         if saved.enable_aim_camera_shake ~= nil then prefs.enable_aim_camera_shake = saved.enable_aim_camera_shake end
         if saved.zero_min_fit_rate ~= nil then prefs.zero_min_fit_rate = saved.zero_min_fit_rate end
+        if saved.perfect_focus ~= nil then prefs.perfect_focus = saved.perfect_focus end
     end
 end
 local function save_prefs()
@@ -207,6 +208,7 @@ local _ha_blend_weight = 0.0
 local _ha_last_time = os.clock()
 local _ha_active_start = nil
 local _ha_breath_mfr_zeroed = false
+local _ha_breath_pf_applied = false
 
 local function get_hold_anim_for_key(key)
     local edit = key and hold_anim_edits[key]
@@ -237,6 +239,98 @@ end
 
 local function _acs_try_call(obj, method)
     local r; pcall(function() r = obj:call(method) end); return r
+end
+
+local _acs_WEAPON_ID_FIELDS = { "_WeaponID", "WeaponID", "_WeaponId" }
+
+local function _acs_get_entry_id(wd)
+    if not wd then return nil end
+    for _, f in ipairs(_acs_WEAPON_ID_FIELDS) do
+        local v = _acs_try_field(wd, f)
+        if v ~= nil then
+            local s = string.lower(tostring(v)):gsub("^%s+", ""):gsub("%s+$", "")
+            if s:match("^[%a_]+%d+$") then return s end
+        end
+    end
+end
+
+local function _acs_write_valuetype(parent_obj, offset, value)
+    for i = 0, value.type:get_valuetype_size() - 1 do
+        parent_obj:write_byte(offset + i, value:read_byte(i))
+    end
+end
+
+local _acs_point_range_originals = {}
+
+local function _acs_apply_point_range(wd, s_val, r_val, cache_key)
+    pcall(function()
+        local wp = _acs_try_field(wd, "_WeaponParameter") or _acs_try_field(wd, "WeaponParameter")
+        if not wp then return end
+        local rft = _acs_try_field(wp, "_ReticleFitParamTable") or _acs_try_field(wp, "ReticleFitParamTable")
+        if not rft then return end
+        local function apply_param(param, sub_key)
+            if not param then return end
+            local param_type = param:get_type_definition()
+            if not param_type then return end
+            local pr_field = param_type:get_field("_PointRange")
+            if not pr_field then return end
+            local pr = param:get_field("_PointRange")
+            if pr then
+                if cache_key and sub_key and not _acs_point_range_originals[sub_key] then
+                    _acs_point_range_originals[sub_key] = { s = pr.s, r = pr.r }
+                end
+                pr.s = s_val
+                pr.r = r_val
+                _acs_write_valuetype(param, pr_field:get_offset_from_base(), pr)
+            end
+        end
+        apply_param(_acs_try_field(rft, "_DefaultParam"), cache_key and (cache_key .. "_def"))
+        local cp = _acs_try_field(rft, "_CustomParams")
+        if cp then
+            local n = 0; pcall(function() n = cp:call("get_Count") end)
+            for i = 0, n - 1 do
+                pcall(function()
+                    local item = cp:call("get_Item", i)
+                    if item then apply_param(_acs_try_field(item, "_Param"), cache_key and (cache_key .. "_c" .. i)) end
+                end)
+            end
+        end
+    end)
+end
+
+local function _acs_restore_point_range(wd, cache_key)
+    pcall(function()
+        local wp = _acs_try_field(wd, "_WeaponParameter") or _acs_try_field(wd, "WeaponParameter")
+        if not wp then return end
+        local rft = _acs_try_field(wp, "_ReticleFitParamTable") or _acs_try_field(wp, "ReticleFitParamTable")
+        if not rft then return end
+        local function restore_param(param, sub_key)
+            if not param or not sub_key then return end
+            local orig = _acs_point_range_originals[sub_key]
+            if not orig then return end
+            local param_type = param:get_type_definition()
+            if not param_type then return end
+            local pr_field = param_type:get_field("_PointRange")
+            if not pr_field then return end
+            local pr = param:get_field("_PointRange")
+            if pr then
+                pr.s = orig.s
+                pr.r = orig.r
+                _acs_write_valuetype(param, pr_field:get_offset_from_base(), pr)
+            end
+        end
+        restore_param(_acs_try_field(rft, "_DefaultParam"), cache_key .. "_def")
+        local cp = _acs_try_field(rft, "_CustomParams")
+        if cp then
+            local n = 0; pcall(function() n = cp:call("get_Count") end)
+            for i = 0, n - 1 do
+                pcall(function()
+                    local item = cp:call("get_Item", i)
+                    if item then restore_param(_acs_try_field(item, "_Param"), cache_key .. "_c" .. i) end
+                end)
+            end
+        end
+    end)
 end
 
 local function _acs_apply()
@@ -288,15 +382,19 @@ local function _acs_apply()
                         pcall(function()
                             local wd = dt:call("get_Item", i)
                             if wd then
+                                local wid = _acs_get_entry_id(wd)
+                                local is_known = wid and WEAPON_NAMES[wid]
                                 local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
                                 if wp then
                                     local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
                                     if acsp then
                                         pcall(function() acsp:set_field("_EnableAimCameraShake", prefs.enable_aim_camera_shake) end)
-                                        if prefs.zero_min_fit_rate then
-                                            pcall(function() acsp:set_field("_MinFitRate", 0.0) end)
-                                        else
-                                            pcall(function() acsp:set_field("_MinFitRate", 1.0) end)
+                                        if is_known then
+                                            if prefs.zero_min_fit_rate then
+                                                pcall(function() acsp:set_field("_MinFitRate", 0.0) end)
+                                            else
+                                                pcall(function() acsp:set_field("_MinFitRate", 1.0) end)
+                                            end
                                         end
                                     end
                                 end
@@ -340,12 +438,93 @@ local function _acs_set_min_fit_rate(value)
             pcall(function()
                 local wd = dt:call("get_Item", i)
                 if wd then
-                    local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
-                    if wp then
-                        local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
-                        if acsp then
-                            pcall(function() acsp:set_field("_MinFitRate", value) end)
+                    local wid = _acs_get_entry_id(wd)
+                    if wid and WEAPON_NAMES[wid] then
+                        local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
+                        if wp then
+                            local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
+                            if acsp then
+                                pcall(function() acsp:set_field("_MinFitRate", value) end)
+                            end
                         end
+                    end
+                end
+            end)
+        end
+    end)
+end
+
+local function _acs_set_point_range_all(s_val, r_val)
+    local scene = _acs_get_scene()
+    if not scene then return end
+    pcall(function()
+        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
+        if not obj then return end
+        local reg
+        for _, t in ipairs(_acs_REGISTER_TYPES) do
+            reg = obj:call("getComponent(System.Type)", t)
+            if reg then break end
+        end
+        if not reg then return end
+        local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
+            or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
+            or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
+            or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
+            or _acs_try_field(reg, "_WeaponCatalogUserData")
+        if not ud then return end
+        local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
+        if not dt then
+            local cd = _acs_try_field(ud, "_CatalogData")
+            if cd then dt = _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
+        end
+        if not dt then return end
+        local count = 0; pcall(function() count = dt:call("get_Count") end)
+        for i = 0, count - 1 do
+            pcall(function()
+                local wd = dt:call("get_Item", i)
+                if wd then
+                    local wid = _acs_get_entry_id(wd)
+                    if wid and WEAPON_NAMES[wid] then
+                        _acs_apply_point_range(wd, s_val, r_val, wid)
+                    end
+                end
+            end)
+        end
+    end)
+end
+
+local function _acs_restore_point_range_all()
+    local scene = _acs_get_scene()
+    if not scene then return end
+    pcall(function()
+        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
+        if not obj then return end
+        local reg
+        for _, t in ipairs(_acs_REGISTER_TYPES) do
+            reg = obj:call("getComponent(System.Type)", t)
+            if reg then break end
+        end
+        if not reg then return end
+        local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
+            or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
+            or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
+            or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
+            or _acs_try_field(reg, "_WeaponCatalogUserData")
+        if not ud then return end
+        local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
+        if not dt then
+            local cd = _acs_try_field(ud, "_CatalogData")
+            if cd then dt = _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
+        end
+        if not dt then return end
+        local count = 0; pcall(function() count = dt:call("get_Count") end)
+        for i = 0, count - 1 do
+            pcall(function()
+                local wd = dt:call("get_Item", i)
+                if wd then
+                    local wid = _acs_get_entry_id(wd)
+                    if wid and WEAPON_NAMES[wid] then
+                        _acs_restore_point_range(wd, wid)
                     end
                 end
             end)
@@ -925,6 +1104,10 @@ re.on_application_entry("UpdateBehavior", function()
                 _acs_set_min_fit_rate(1.0)
                 _ha_breath_mfr_zeroed = false
             end
+            if _ha_breath_pf_applied then
+                _acs_restore_point_range_all()
+                _ha_breath_pf_applied = false
+            end
             _ha_hotkey_activated = false
         end
     else
@@ -945,6 +1128,10 @@ re.on_application_entry("UpdateBehavior", function()
                 if _ha_breath_mfr_zeroed then
                     _acs_set_min_fit_rate(1.0)
                     _ha_breath_mfr_zeroed = false
+                end
+                if _ha_breath_pf_applied then
+                    _acs_restore_point_range_all()
+                    _ha_breath_pf_applied = false
                 end
             end
             refresh_any_hold_anim()
@@ -981,6 +1168,10 @@ re.on_application_entry("UpdateBehavior", function()
         if _ha_breath_mfr_zeroed then
             _acs_set_min_fit_rate(1.0)
             _ha_breath_mfr_zeroed = false
+        end
+        if _ha_breath_pf_applied then
+            _acs_restore_point_range_all()
+            _ha_breath_pf_applied = false
         end
         return
     end
@@ -1022,6 +1213,15 @@ re.on_application_entry("UpdateBehavior", function()
     elseif not should_zero_mfr and _ha_breath_mfr_zeroed then
         _acs_set_min_fit_rate(1.0)
         _ha_breath_mfr_zeroed = false
+    end
+
+    local should_pf = prefs.perfect_focus and want_active and _ha_blend_weight > 0
+    if should_pf and not _ha_breath_pf_applied then
+        _acs_set_point_range_all(100, 100)
+        _ha_breath_pf_applied = true
+    elseif not should_pf and _ha_breath_pf_applied then
+        _acs_restore_point_range_all()
+        _ha_breath_pf_applied = false
     end
 end)
 
@@ -1290,6 +1490,18 @@ re.on_draw_ui(function()
             save_prefs()
             _acs_applied = false
         end
+        local pf_changed, pf_new = imgui.checkbox("Perfect Focus (Breath Hold)", prefs.perfect_focus)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("When holding breath, sets _PointRange to 100 for instant perfect aim. Reverts when breath runs out or released")
+        end
+        if pf_changed then
+            prefs.perfect_focus = pf_new
+            save_prefs()
+            if not pf_new and _ha_breath_pf_applied then
+                _acs_restore_point_range_all()
+                _ha_breath_pf_applied = false
+            end
+        end
 
         imgui.spacing()
         imgui.text_colored("Hold Animation:", 0xFFFFFF00)
@@ -1311,8 +1523,9 @@ re.on_draw_ui(function()
             local t = _ha_blend_weight
             imgui.text(string.format("  blend: %.3f | force: %.3f -> %.3f | speed: %.3f -> %.3f | holding: %s",
                 t, dbg_force, 1.0 + (dbg_force - 1.0) * t, dbg_speed, 1.0 + (dbg_speed - 1.0) * t, tostring(cached_is_holding)))
-            imgui.text(string.format("  mfr_zeroed: %s | breath_start: %s | breath_dur: %.1f",
+            imgui.text(string.format("  mfr_zeroed: %s | pf_applied: %s | breath_start: %s | breath_dur: %.1f",
                 tostring(_ha_breath_mfr_zeroed),
+                tostring(_ha_breath_pf_applied),
                 _ha_active_start and string.format("%.1f ago", os.clock() - _ha_active_start) or "nil",
                 prefs.ha_breath_duration))
             if #all_ml > 0 then
