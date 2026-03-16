@@ -335,13 +335,20 @@ local function _acs_restore_point_range(wd, cache_key)
     end)
 end
 
-local function _acs_apply()
+local function _acs_find_all_catalogs()
     local scene = _acs_get_scene()
-    if not scene then return end
-    local catalogs = {}
+    if not scene then return {} end
+    local results = {}
+    local seen = {}
     pcall(function()
         local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
-        if obj then catalogs[#catalogs + 1] = obj end
+        if obj then
+            local addr = obj:get_address()
+            if not seen[addr] then
+                seen[addr] = true
+                results[#results + 1] = obj
+            end
+        end
     end)
     if _acs_TYPE_WCR then
         pcall(function()
@@ -353,57 +360,70 @@ local function _acs_apply()
                         local comp = all:call("get_Item", i)
                         if comp then
                             local go = comp:call("get_GameObject")
-                            if go then catalogs[#catalogs + 1] = go end
+                            if go then
+                                local addr = go:get_address()
+                                if not seen[addr] then
+                                    seen[addr] = true
+                                    results[#results + 1] = go
+                                end
+                            end
                         end
                     end)
                 end
             end
         end)
     end
+    return results
+end
+
+local function _acs_get_data_table(catalog)
+    if not catalog then return nil end
+    local reg
+    for _, t in ipairs(_acs_REGISTER_TYPES) do
+        reg = catalog:call("getComponent(System.Type)", t)
+        if reg then break end
+    end
+    if not reg then return nil end
+    local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
+        or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
+        or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
+        or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
+        or _acs_try_field(reg, "_WeaponCatalogUserData")
+    if not ud then return nil end
+    local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
+    if dt then return dt end
+    local cd = _acs_try_field(ud, "_CatalogData")
+    if cd then return _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
+    return nil
+end
+
+local function _acs_apply()
+    local catalogs = _acs_find_all_catalogs()
     for _, catalog in ipairs(catalogs) do
-        local reg
-        for _, t in ipairs(_acs_REGISTER_TYPES) do
-            reg = catalog:call("getComponent(System.Type)", t)
-            if reg then break end
-        end
-        if reg then
-            local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
-                or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
-                or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
-                or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
-                or _acs_try_field(reg, "_WeaponCatalogUserData")
-            if ud then
-                local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
-                if not dt then
-                    local cd = _acs_try_field(ud, "_CatalogData")
-                    if cd then dt = _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
-                end
-                if dt then
-                    local count = 0; pcall(function() count = dt:call("get_Count") end)
-                    for i = 0, count - 1 do
-                        pcall(function()
-                            local wd = dt:call("get_Item", i)
-                            if wd then
-                                local wid = _acs_get_entry_id(wd)
-                                local is_known = wid and WEAPON_NAMES[wid]
-                                local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
-                                if wp then
-                                    local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
-                                    if acsp then
-                                        -- pcall(function() acsp:set_field("_EnableAimCameraShake", prefs.enable_aim_camera_shake) end)
-                                        if is_known then
-                                            if prefs.zero_min_fit_rate then
-                                                pcall(function() acsp:set_field("_MinFitRate", 0.0) end)
-                                            else
-                                                pcall(function() acsp:set_field("_MinFitRate", 1.0) end)
-                                            end
-                                        end
+        local dt = _acs_get_data_table(catalog)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                pcall(function()
+                    local wd = dt:call("get_Item", i)
+                    if wd then
+                        local wid = _acs_get_entry_id(wd)
+                        local is_known = wid and WEAPON_NAMES[wid]
+                        local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
+                        if wp then
+                            local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
+                            if acsp then
+                                if is_known then
+                                    if prefs.zero_min_fit_rate then
+                                        pcall(function() acsp:set_field("_MinFitRate", 0.0) end)
+                                    else
+                                        pcall(function() acsp:set_field("_MinFitRate", 1.0) end)
                                     end
                                 end
                             end
-                        end)
+                        end
                     end
-                end
+                end)
             end
         end
     end
@@ -412,126 +432,72 @@ end
 local _acs_applied = false
 
 local function _acs_set_min_fit_rate(value)
-    local scene = _acs_get_scene()
-    if not scene then return end
-    pcall(function()
-        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
-        if not obj then return end
-        local reg
-        for _, t in ipairs(_acs_REGISTER_TYPES) do
-            reg = obj:call("getComponent(System.Type)", t)
-            if reg then break end
-        end
-        if not reg then return end
-        local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
-            or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
-            or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
-            or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
-            or _acs_try_field(reg, "_WeaponCatalogUserData")
-        if not ud then return end
-        local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
-        if not dt then
-            local cd = _acs_try_field(ud, "_CatalogData")
-            if cd then dt = _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
-        end
-        if not dt then return end
-        local count = 0; pcall(function() count = dt:call("get_Count") end)
-        for i = 0, count - 1 do
-            pcall(function()
-                local wd = dt:call("get_Item", i)
-                if wd then
-                    local wid = _acs_get_entry_id(wd)
-                    if wid and WEAPON_NAMES[wid] then
-                        local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
-                        if wp then
-                            local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
-                            if acsp then
-                                pcall(function() acsp:set_field("_MinFitRate", value) end)
+    local catalogs = _acs_find_all_catalogs()
+    for _, catalog in ipairs(catalogs) do
+        local dt = _acs_get_data_table(catalog)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                pcall(function()
+                    local wd = dt:call("get_Item", i)
+                    if wd then
+                        local wid = _acs_get_entry_id(wd)
+                        if wid and WEAPON_NAMES[wid] then
+                            local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
+                            if wp then
+                                local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
+                                if acsp then
+                                    pcall(function() acsp:set_field("_MinFitRate", value) end)
+                                end
                             end
                         end
                     end
-                end
-            end)
+                end)
+            end
         end
-    end)
+    end
 end
 
 local function _acs_set_point_range_all(s_val, r_val)
-    local scene = _acs_get_scene()
-    if not scene then return end
-    pcall(function()
-        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
-        if not obj then return end
-        local reg
-        for _, t in ipairs(_acs_REGISTER_TYPES) do
-            reg = obj:call("getComponent(System.Type)", t)
-            if reg then break end
-        end
-        if not reg then return end
-        local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
-            or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
-            or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
-            or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
-            or _acs_try_field(reg, "_WeaponCatalogUserData")
-        if not ud then return end
-        local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
-        if not dt then
-            local cd = _acs_try_field(ud, "_CatalogData")
-            if cd then dt = _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
-        end
-        if not dt then return end
-        local count = 0; pcall(function() count = dt:call("get_Count") end)
-        for i = 0, count - 1 do
-            pcall(function()
-                local wd = dt:call("get_Item", i)
-                if wd then
-                    local wid = _acs_get_entry_id(wd)
-                    if wid and WEAPON_NAMES[wid] then
-                        _acs_apply_point_range(wd, s_val, r_val, wid)
+    local catalogs = _acs_find_all_catalogs()
+    for _, catalog in ipairs(catalogs) do
+        local dt = _acs_get_data_table(catalog)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                pcall(function()
+                    local wd = dt:call("get_Item", i)
+                    if wd then
+                        local wid = _acs_get_entry_id(wd)
+                        if wid and WEAPON_NAMES[wid] then
+                            _acs_apply_point_range(wd, s_val, r_val, wid)
+                        end
                     end
-                end
-            end)
+                end)
+            end
         end
-    end)
+    end
 end
 
 local function _acs_restore_point_range_all()
-    local scene = _acs_get_scene()
-    if not scene then return end
-    pcall(function()
-        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
-        if not obj then return end
-        local reg
-        for _, t in ipairs(_acs_REGISTER_TYPES) do
-            reg = obj:call("getComponent(System.Type)", t)
-            if reg then break end
-        end
-        if not reg then return end
-        local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
-            or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
-            or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
-            or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
-            or _acs_try_field(reg, "_WeaponCatalogUserData")
-        if not ud then return end
-        local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
-        if not dt then
-            local cd = _acs_try_field(ud, "_CatalogData")
-            if cd then dt = _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
-        end
-        if not dt then return end
-        local count = 0; pcall(function() count = dt:call("get_Count") end)
-        for i = 0, count - 1 do
-            pcall(function()
-                local wd = dt:call("get_Item", i)
-                if wd then
-                    local wid = _acs_get_entry_id(wd)
-                    if wid and WEAPON_NAMES[wid] then
-                        _acs_restore_point_range(wd, wid)
+    local catalogs = _acs_find_all_catalogs()
+    for _, catalog in ipairs(catalogs) do
+        local dt = _acs_get_data_table(catalog)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                pcall(function()
+                    local wd = dt:call("get_Item", i)
+                    if wd then
+                        local wid = _acs_get_entry_id(wd)
+                        if wid and WEAPON_NAMES[wid] then
+                            _acs_restore_point_range(wd, wid)
+                        end
                     end
-                end
-            end)
+                end)
+            end
         end
-    end)
+    end
 end
 
 re.on_pre_application_entry("LockScene", function()
@@ -1356,6 +1322,46 @@ re.on_draw_ui(function()
             prefs.muzzle_disable_ads_snipers = muz_sniper_v
             save_prefs()
         end
+        local ais_changed, ais_new = imgui.checkbox("Auto Iron Sight Mode", prefs.auto_iron_sight)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Shows crosshair in default view; hides crosshair and enables muzzle spawn in iron sights")
+        end
+        if ais_changed then
+            prefs.auto_iron_sight = ais_new
+            save_prefs()
+            if ais_new then
+                sync_auto_iron_sight()
+            else
+                hide_reticle = prefs.hide_reticle
+                bullet_from_muzzle = prefs.bullet_from_muzzle
+            end
+        end
+        if not prefs.auto_iron_sight then
+        local ret_changed
+        ret_changed, hide_reticle = imgui.checkbox("Hide Reticle in First Person", hide_reticle)
+        if ret_changed then
+            prefs.hide_reticle = hide_reticle
+            if not hide_reticle and bullet_from_muzzle then
+                bullet_from_muzzle = false
+                prefs.bullet_from_muzzle = false
+            end
+            save_prefs()
+        end
+        if hide_reticle then
+            local muzzle_changed
+            muzzle_changed, bullet_from_muzzle = imgui.checkbox("Spawn Bullet From Muzzle", bullet_from_muzzle)
+            if muzzle_changed then
+                prefs.bullet_from_muzzle = bullet_from_muzzle
+                save_prefs()
+            end
+            if bullet_from_muzzle then
+                -- imgui.text("  Joint: " .. muzzle_debug_joint_name)
+                if muzzle_debug_joint_name == "NOT FOUND" and muzzle_debug_all_joints ~= "" then
+                    imgui.text_colored("  All joints: " .. muzzle_debug_all_joints, 0xFF00FFFF)
+                end
+            end
+        end
+        end
         imgui.separator()
 
         local equipped_id = cached_weapon_id
@@ -1490,47 +1496,6 @@ re.on_draw_ui(function()
             end
         end
 
-        imgui.separator()
-        local ais_changed, ais_new = imgui.checkbox("Auto Iron Sight Mode", prefs.auto_iron_sight)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Shows crosshair in default view; hides crosshair and enables muzzle spawn in iron sights")
-        end
-        if ais_changed then
-            prefs.auto_iron_sight = ais_new
-            save_prefs()
-            if ais_new then
-                sync_auto_iron_sight()
-            else
-                hide_reticle = prefs.hide_reticle
-                bullet_from_muzzle = prefs.bullet_from_muzzle
-            end
-        end
-        if not prefs.auto_iron_sight then
-        local ret_changed
-        ret_changed, hide_reticle = imgui.checkbox("Hide Reticle in First Person", hide_reticle)
-        if ret_changed then
-            prefs.hide_reticle = hide_reticle
-            if not hide_reticle and bullet_from_muzzle then
-                bullet_from_muzzle = false
-                prefs.bullet_from_muzzle = false
-            end
-            save_prefs()
-        end
-        if hide_reticle then
-            local muzzle_changed
-            muzzle_changed, bullet_from_muzzle = imgui.checkbox("Spawn Bullet From Muzzle", bullet_from_muzzle)
-            if muzzle_changed then
-                prefs.bullet_from_muzzle = bullet_from_muzzle
-                save_prefs()
-            end
-            if bullet_from_muzzle then
-                -- imgui.text("  Joint: " .. muzzle_debug_joint_name)
-                if muzzle_debug_joint_name == "NOT FOUND" and muzzle_debug_all_joints ~= "" then
-                    imgui.text_colored("  All joints: " .. muzzle_debug_all_joints, 0xFF00FFFF)
-                end
-            end
-        end
-        end
 
         -- local mav_changed
         -- mav_changed, prefs.muzzle_all_views = imgui.checkbox("Bullets Follow Muzzle (All Views)", prefs.muzzle_all_views)
@@ -1571,6 +1536,7 @@ re.on_draw_ui(function()
         -- end
 
         imgui.spacing()
+        imgui.separator()
         imgui.text_colored("Hold Animation:", 0xFFFFFF00)
         local breath_changed, breath_new = imgui.drag_float("Breath Duration (s)", prefs.ha_breath_duration, 0.1, 0.0, 30.0, "%.1f")
         if imgui.is_item_hovered() then
@@ -1595,14 +1561,14 @@ re.on_draw_ui(function()
             --     tostring(_ha_breath_pf_applied),
             --     _ha_active_start and string.format("%.1f ago", os.clock() - _ha_active_start) or "nil",
             --     prefs.ha_breath_duration))
-            if #all_ml > 0 then
-                for _, info in ipairs(all_ml) do
-                    local cur_br, cur_sp = 0, 0
-                    pcall(function() cur_br = info.layer:call("get_BlendRate") end)
-                    pcall(function() cur_sp = info.layer:call("get_Speed") end)
-                    imgui.text(string.format("    L%d %s  BR=%.3f  Sp=%.3f", info.idx, info.name, cur_br, cur_sp))
-                end
-            end
+            -- if #all_ml > 0 then
+            --     for _, info in ipairs(all_ml) do
+            --         local cur_br, cur_sp = 0, 0
+            --         pcall(function() cur_br = info.layer:call("get_BlendRate") end)
+            --         pcall(function() cur_sp = info.layer:call("get_Speed") end)
+            --         imgui.text(string.format("    L%d %s  BR=%.3f  Sp=%.3f", info.idx, info.name, cur_br, cur_sp))
+            --     end
+            -- end
             if #all_ml > 0 and wkey then
                 local wedit = hold_anim_edits[wkey] or {}
                 local ha_enabled = wedit.enabled or false
@@ -1711,6 +1677,7 @@ re.on_draw_ui(function()
         end
 
         imgui.spacing()
+        imgui.separator()
         imgui.text_colored("Transitions:", 0xFFFFFF00)
         local tin_changed
         tin_changed, TRANSITION_IN = imgui.drag_float("Aim In (sec)", TRANSITION_IN, 0.01, 0.0, 5.0, "%.2f")
@@ -1743,10 +1710,12 @@ re.on_draw_ui(function()
             save_prefs()
         end
 
+        imgui.separator()
         imgui.spacing()
         imgui.text_colored("Hotkeys:", 0xFFFFFF00)
         local hk_changed = false
         local wc = false
+        imgui.separator()
 
         imgui.text_colored(" Standard FPS Toggle:", 0xFFFFFFAA)
         imgui.indent(10)
@@ -1771,8 +1740,8 @@ re.on_draw_ui(function()
         hk_changed = hk.hotkey_setter("Pad Standard FPS Toggle", is_hk_settings.use_pad_modifier and "Pad SFPS Modifier") or hk_changed
         imgui.unindent(10)
         imgui.unindent(10)
+        imgui.separator()
 
-        imgui.spacing()
         imgui.text_colored(" Hold Animation Toggle:", 0xFFFFFFAA)
         imgui.indent(10)
         imgui.text("Keyboard and Mouse:")
@@ -1804,6 +1773,7 @@ re.on_draw_ui(function()
             save_prefs()
         end
         imgui.unindent(10)
+        imgui.separator()
 
         if hk_changed or wc then
             hk.update_hotkey_table(is_hk_settings.hotkeys)
@@ -1818,5 +1788,7 @@ re.on_draw_ui(function()
         end
 
         imgui.tree_pop()
+        imgui.spacing()
+        imgui.spacing()
     end
 end)
