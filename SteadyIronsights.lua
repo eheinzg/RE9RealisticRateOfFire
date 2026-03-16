@@ -161,7 +161,7 @@ local function set_cover_offset(weapon_key, cover_state, x, y, z)
     save_cover_offsets()
 end
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, steady_aim = false, steady_aim_amount = 0.3, steady_aim_alpha = 0.08, steady_aim_auto = false, steady_aim_delay = false, steady_aim_pause_shoot = false, steady_aim_pause_move = false, ha_hold_to_activate = false }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = false, ha_breath_duration = 0, enable_aim_camera_shake = true, zero_min_fit_rate = false }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
@@ -172,14 +172,10 @@ do
         if saved.transition_out ~= nil then prefs.transition_out = saved.transition_out end
         if saved.transition_swap ~= nil then prefs.transition_swap = saved.transition_swap end
         if saved.standard_fps_mode ~= nil then prefs.standard_fps_mode = saved.standard_fps_mode end
-        if saved.steady_aim ~= nil then prefs.steady_aim = saved.steady_aim end
-        if saved.steady_aim_amount ~= nil then prefs.steady_aim_amount = saved.steady_aim_amount end
-        if saved.steady_aim_alpha ~= nil then prefs.steady_aim_alpha = saved.steady_aim_alpha end
-        if saved.steady_aim_auto ~= nil then prefs.steady_aim_auto = saved.steady_aim_auto end
-        if saved.steady_aim_delay ~= nil then prefs.steady_aim_delay = saved.steady_aim_delay end
-        if saved.steady_aim_pause_shoot ~= nil then prefs.steady_aim_pause_shoot = saved.steady_aim_pause_shoot end
-        if saved.steady_aim_pause_move ~= nil then prefs.steady_aim_pause_move = saved.steady_aim_pause_move end
         if saved.ha_hold_to_activate ~= nil then prefs.ha_hold_to_activate = saved.ha_hold_to_activate end
+        if saved.ha_breath_duration ~= nil then prefs.ha_breath_duration = saved.ha_breath_duration end
+        if saved.enable_aim_camera_shake ~= nil then prefs.enable_aim_camera_shake = saved.enable_aim_camera_shake end
+        if saved.zero_min_fit_rate ~= nil then prefs.zero_min_fit_rate = saved.zero_min_fit_rate end
     end
 end
 local function save_prefs()
@@ -209,6 +205,8 @@ refresh_any_hold_anim()
 local _ha_was_holding = false
 local _ha_blend_weight = 0.0
 local _ha_last_time = os.clock()
+local _ha_active_start = nil
+local _ha_breath_mfr_zeroed = false
 
 local function get_hold_anim_for_key(key)
     local edit = key and hold_anim_edits[key]
@@ -217,6 +215,155 @@ local function get_hold_anim_for_key(key)
     end
     return false, 1.0, 1.0, nil, 0, 4.0
 end
+
+local _acs_TYPE_WCR = sdk.typeof("app.WeaponCatalogRegister")
+local _acs_REGISTER_TYPES = {}
+do
+    for _, tn in ipairs({ "app.WeaponCatalogRegister", "chainsaw.WeaponCatalogRegister" }) do
+        local t = sdk.typeof(tn)
+        if t then _acs_REGISTER_TYPES[#_acs_REGISTER_TYPES + 1] = t end
+    end
+end
+
+local function _acs_get_scene()
+    local sm = sdk.get_native_singleton("via.SceneManager")
+    local sm_type = sm and sdk.find_type_definition("via.SceneManager")
+    return sm_type and sdk.call_native_func(sm, sm_type, "get_CurrentScene")
+end
+
+local function _acs_try_field(obj, name)
+    local r; pcall(function() r = obj:get_field(name) end); return r
+end
+
+local function _acs_try_call(obj, method)
+    local r; pcall(function() r = obj:call(method) end); return r
+end
+
+local function _acs_apply()
+    local scene = _acs_get_scene()
+    if not scene then return end
+    local catalogs = {}
+    pcall(function()
+        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
+        if obj then catalogs[#catalogs + 1] = obj end
+    end)
+    if _acs_TYPE_WCR then
+        pcall(function()
+            local all = scene:call("findComponents(System.Type)", _acs_TYPE_WCR)
+            if all then
+                local n = 0; pcall(function() n = all:call("get_Count") end)
+                for i = 0, n - 1 do
+                    pcall(function()
+                        local comp = all:call("get_Item", i)
+                        if comp then
+                            local go = comp:call("get_GameObject")
+                            if go then catalogs[#catalogs + 1] = go end
+                        end
+                    end)
+                end
+            end
+        end)
+    end
+    for _, catalog in ipairs(catalogs) do
+        local reg
+        for _, t in ipairs(_acs_REGISTER_TYPES) do
+            reg = catalog:call("getComponent(System.Type)", t)
+            if reg then break end
+        end
+        if reg then
+            local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
+                or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
+                or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
+                or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
+                or _acs_try_field(reg, "_WeaponCatalogUserData")
+            if ud then
+                local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
+                if not dt then
+                    local cd = _acs_try_field(ud, "_CatalogData")
+                    if cd then dt = _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
+                end
+                if dt then
+                    local count = 0; pcall(function() count = dt:call("get_Count") end)
+                    for i = 0, count - 1 do
+                        pcall(function()
+                            local wd = dt:call("get_Item", i)
+                            if wd then
+                                local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
+                                if wp then
+                                    local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
+                                    if acsp then
+                                        pcall(function() acsp:set_field("_EnableAimCameraShake", prefs.enable_aim_camera_shake) end)
+                                        if prefs.zero_min_fit_rate then
+                                            pcall(function() acsp:set_field("_MinFitRate", 0.0) end)
+                                        else
+                                            pcall(function() acsp:set_field("_MinFitRate", 1.0) end)
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local _acs_applied = false
+
+local function _acs_set_min_fit_rate(value)
+    local scene = _acs_get_scene()
+    if not scene then return end
+    pcall(function()
+        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
+        if not obj then return end
+        local reg
+        for _, t in ipairs(_acs_REGISTER_TYPES) do
+            reg = obj:call("getComponent(System.Type)", t)
+            if reg then break end
+        end
+        if not reg then return end
+        local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
+            or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
+            or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
+            or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
+            or _acs_try_field(reg, "_WeaponCatalogUserData")
+        if not ud then return end
+        local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
+        if not dt then
+            local cd = _acs_try_field(ud, "_CatalogData")
+            if cd then dt = _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
+        end
+        if not dt then return end
+        local count = 0; pcall(function() count = dt:call("get_Count") end)
+        for i = 0, count - 1 do
+            pcall(function()
+                local wd = dt:call("get_Item", i)
+                if wd then
+                    local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
+                    if wp then
+                        local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
+                        if acsp then
+                            pcall(function() acsp:set_field("_MinFitRate", value) end)
+                        end
+                    end
+                end
+            end)
+        end
+    end)
+end
+
+re.on_pre_application_entry("LockScene", function()
+    if _acs_applied then return end
+    _acs_apply()
+    _acs_applied = true
+end)
+
+sdk.hook(
+    sdk.find_type_definition("via.SceneManager"):get_method("begin_change_sceneByString"),
+    function() _acs_applied = false; return sdk.PreHookResult.CALL_ORIGINAL end,
+    nil
+)
 
 -- UI state for the currently selected weapon's sliders
 local ui_offset = { x = 0.0, y = 0.0, z = 0.0 }
@@ -475,7 +622,6 @@ local is_hk_default_settings = {
         ["Standard FPS Toggle"] = "EX0",
         ["Pad SFPS Modifier"] = "LT (L2)",
         ["Pad Standard FPS Toggle"] = "",
-        ["Steady Aim Toggle"] = "",
         ["Hold Animation Toggle"] = "",
     }
 }
@@ -483,14 +629,7 @@ local is_hk_settings = hk.recurse_def_settings(json.load_file(IS_HK_PATH) or {},
 hk.setup_hotkeys(is_hk_settings.hotkeys)
 
 local sfps_toggle_was_down = false
-local sa_toggle_was_down = false
 local ha_toggle_was_down = false
-local steady_aim_enabled = prefs.steady_aim
-local steady_aim_amount = prefs.steady_aim_amount
-local steady_aim_auto = prefs.steady_aim_auto
-local steady_aim_delay = prefs.steady_aim_delay
-local steady_aim_pause_shoot = prefs.steady_aim_pause_shoot
-local steady_aim_pause_move = prefs.steady_aim_pause_move
 
 re.on_application_entry("UpdateBehavior", function()
     local kb = (not is_hk_settings.use_modifier or hk.check_hotkey("SFPS Modifier", true)) and hk.check_hotkey("Standard FPS Toggle", true)
@@ -504,15 +643,6 @@ re.on_application_entry("UpdateBehavior", function()
         sfps_toggled_this_frame = true
     end
     sfps_toggle_was_down = is_down or false
-
-    local sa_down = hk.check_hotkey("Steady Aim Toggle", true)
-    if sa_down and not sa_toggle_was_down then
-        steady_aim_enabled = not steady_aim_enabled
-        prefs.steady_aim = steady_aim_enabled
-        save_prefs()
-        if not steady_aim_enabled and sa_clear then sa_clear() end
-    end
-    sa_toggle_was_down = sa_down or false
 end)
 
 local camera_offset_applied = false
@@ -722,8 +852,7 @@ re.on_pre_application_entry("LockScene", function()
     camera_offset_applied = true
 end)
 
-local _sa_smoothed = {}
-local _sa_alpha = prefs.steady_aim_alpha
+local _ha_hold_start = nil
 
 local function get_player_motion_is()
     local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
@@ -774,6 +903,7 @@ re.on_application_entry("UpdateBehavior", function()
                 if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
                 hold_anim_edits[wkey].enabled = true
                 _ha_blend_weight = 0.0
+                _ha_active_start = nil
                 refresh_any_hold_anim()
                 save_hold_anim()
                 _ha_hotkey_activated = true
@@ -791,6 +921,10 @@ re.on_application_entry("UpdateBehavior", function()
                 refresh_any_hold_anim()
                 save_hold_anim()
             end
+            if _ha_breath_mfr_zeroed then
+                _acs_set_min_fit_rate(1.0)
+                _ha_breath_mfr_zeroed = false
+            end
             _ha_hotkey_activated = false
         end
     else
@@ -799,6 +933,7 @@ re.on_application_entry("UpdateBehavior", function()
             local new_state = not (hold_anim_edits[wkey].enabled or false)
             hold_anim_edits[wkey].enabled = new_state
             _ha_blend_weight = 0.0
+            _ha_active_start = nil
             if not new_state then
                 local all_ml = get_all_motion_layers_is()
                 for _, info in ipairs(all_ml) do
@@ -806,6 +941,10 @@ re.on_application_entry("UpdateBehavior", function()
                         info.layer:call("set_BlendRate", 1.0)
                         info.layer:call("set_Speed", 1.0)
                     end)
+                end
+                if _ha_breath_mfr_zeroed then
+                    _acs_set_min_fit_rate(1.0)
+                    _ha_breath_mfr_zeroed = false
                 end
             end
             refresh_any_hold_anim()
@@ -815,258 +954,13 @@ re.on_application_entry("UpdateBehavior", function()
     ha_toggle_was_down = ha_down or false
 end)
 
-local _sa_body_transform = nil
-local _sa_joint_list = nil
-local _sa_was_holding = false
-
-local __sa_temp_quat = nil
-pcall(function()
-    __sa_temp_quat = ValueType.new(sdk.find_type_definition("via.Quaternion"))
-end)
-
-local function sa_get_body_transform()
-    local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
-    if not char_mgr then return nil end
-    local ctx = nil
-    pcall(function() ctx = char_mgr:call("get_PlayerContextFast") end)
-    if not ctx then return nil end
-    local go = nil
-    pcall(function() go = ctx:call("get_GameObject") end)
-    if not go then return nil end
-    local tf = nil
-    pcall(function() tf = go:call("get_Transform") end)
-    return tf
-end
-
-local SA_ARM_PATTERNS = {
-    "Arm", "arm", "Elbow", "elbow",
-    "Wrist", "wrist", "Hand", "hand", "Finger", "finger",
-    "Thumb", "thumb",
-}
-
-local function sa_is_arm_joint(name)
-    if not name or name == "" then return false end
-    for _, pat in ipairs(SA_ARM_PATTERNS) do
-        if name:find(pat) then return true end
-    end
-    return false
-end
-
-local function sa_build_joint_list(tf)
-    local joints = {}
-    local ok, jarray = pcall(function() return tf:call("get_Joints") end)
-    if not ok or not jarray then return joints end
-    local count = 0
-    pcall(function() count = jarray:call("get_Count") end)
-    if count == 0 then
-        pcall(function() count = jarray:get_size() end)
-    end
-    for i = 0, count - 1 do
-        pcall(function()
-            local j = jarray[i]
-            if j then
-                local jname = ""
-                pcall(function() jname = j:call("get_Name") or "" end)
-                if sa_is_arm_joint(jname) then
-                    joints[#joints + 1] = { joint = j, name = jname }
-                end
-            end
-        end)
-    end
-    return joints
-end
-
-local function sa_ensure_joints()
-    if not _sa_body_transform then
-        _sa_body_transform = sa_get_body_transform()
-        if not _sa_body_transform then return false end
-        _sa_joint_list = sa_build_joint_list(_sa_body_transform)
-    end
-    return _sa_joint_list and #_sa_joint_list > 0
-end
-
-local function sa_clear()
-    _sa_body_transform = nil
-    _sa_joint_list = nil
-    _sa_smoothed = {}
-    _sa_was_holding = false
-end
-
-local function quat_nlerp_t(cur, ref, t)
-    local cx, cy, cz, cw = cur.x, cur.y, cur.z, cur.w
-    local rx, ry, rz, rw = ref.x, ref.y, ref.z, ref.w
-    if cx*rx + cy*ry + cz*rz + cw*rw < 0 then
-        rx, ry, rz, rw = -rx, -ry, -rz, -rw
-    end
-    local nx = cx + (rx - cx) * t
-    local ny = cy + (ry - cy) * t
-    local nz = cz + (rz - cz) * t
-    local nw = cw + (rw - cw) * t
-    local len = math.sqrt(nx*nx + ny*ny + nz*nz + nw*nw)
-    if len > 0.0001 then
-        nx, ny, nz, nw = nx/len, ny/len, nz/len, nw/len
-    end
-    return nx, ny, nz, nw
-end
-
-local _sa_prev_cam_rot = nil
-local _sa_auto_active = false
-local _sa_AUTO_THRESHOLD = 0.00000001
-local _sa_hold_start = nil
-local _sa_last_shot_time = 0
-local _sa_blend_weight = 0.0
-local _sa_BLEND_SPEED = 8.0
-local _sa_prev_pos = nil
-local _sa_player_moving = false
-local _sa_MOVE_THRESHOLD = 0.0001
-
-do
-    local equip_td = sdk.find_type_definition("app.PlayerEquipment")
-    if equip_td then
-        local exec_fire = equip_td:get_method("execFire")
-        if exec_fire then
-            sdk.hook(exec_fire, function() _sa_last_shot_time = os.clock() end, nil)
-        end
-    end
-end
-
-re.on_application_entry("LateUpdateBehavior", function()
-    if cached_view_mode == 1 and cached_is_holding then
-        if not _sa_hold_start then _sa_hold_start = os.clock() end
-    else
-        _sa_hold_start = nil
-    end
-
-    local want_active = steady_aim_enabled
-    if steady_aim_auto and not steady_aim_enabled then
-        if cached_view_mode == 1 and cached_is_holding then
-            pcall(function()
-                local cam = sdk.get_primary_camera()
-                if cam then
-                    local cam_go = cam:call("get_GameObject")
-                    if cam_go then
-                        local cam_xf = cam_go:call("get_Transform")
-                        if cam_xf then
-                            local rot = cam_xf:call("get_Rotation")
-                            if rot and _sa_prev_cam_rot then
-                                local dx = rot.x - _sa_prev_cam_rot.x
-                                local dy = rot.y - _sa_prev_cam_rot.y
-                                local dz = rot.z - _sa_prev_cam_rot.z
-                                local dw = rot.w - _sa_prev_cam_rot.w
-                                local delta = dx*dx + dy*dy + dz*dz + dw*dw
-                                _sa_auto_active = delta <= _sa_AUTO_THRESHOLD
-                            else
-                                _sa_auto_active = false
-                            end
-                            if rot then
-                                _sa_prev_cam_rot = { x = rot.x, y = rot.y, z = rot.z, w = rot.w }
-                            end
-                        end
-                    end
-                end
-            end)
-            want_active = _sa_auto_active
-        else
-            _sa_auto_active = false
-            _sa_prev_cam_rot = nil
-        end
-    elseif not steady_aim_auto then
-        _sa_prev_cam_rot = nil
-        _sa_auto_active = false
-    end
-
-    if steady_aim_delay and want_active then
-        if not _sa_hold_start or (os.clock() - _sa_hold_start) < 1.0 then
-            want_active = false
-        end
-    end
-
-    if steady_aim_pause_shoot and want_active then
-        if (os.clock() - _sa_last_shot_time) < 0.1 then
-            want_active = false
-        end
-    end
-
-    if steady_aim_pause_move then
-        pcall(function()
-            local tf = sa_get_body_transform()
-            if tf then
-                local pos = tf:call("get_Position")
-                if pos and _sa_prev_pos then
-                    local dx = pos.x - _sa_prev_pos.x
-                    local dy = pos.y - _sa_prev_pos.y
-                    local dz = pos.z - _sa_prev_pos.z
-                    _sa_player_moving = (dx*dx + dy*dy + dz*dz) > _sa_MOVE_THRESHOLD
-                else
-                    _sa_player_moving = false
-                end
-                if pos then
-                    _sa_prev_pos = { x = pos.x, y = pos.y, z = pos.z }
-                end
-            end
-        end)
-        if _sa_player_moving and want_active then
-            want_active = false
-        end
-    else
-        _sa_prev_pos = nil
-        _sa_player_moving = false
-    end
-
-    if cached_view_mode ~= 1 or not cached_is_holding then
-        want_active = false
-    end
-
-    if steady_aim_amount >= 1.0 then
-        want_active = false
-    end
-
-    local dt = 1.0 / 60.0
-    if want_active then
-        _sa_blend_weight = math.min(1.0, _sa_blend_weight + dt * _sa_BLEND_SPEED)
-    else
-        _sa_blend_weight = math.max(0.0, _sa_blend_weight - dt * _sa_BLEND_SPEED)
-    end
-
-    if _sa_blend_weight <= 0.001 then
-        if _sa_was_holding then sa_clear() end
-        return
-    end
-
-    pcall(function()
-        if not sa_ensure_joints() then return end
-
-        local t = (1.0 - steady_aim_amount) * _sa_blend_weight
-
-        for i, entry in ipairs(_sa_joint_list) do
-            pcall(function()
-                local cur = entry.joint:call("get_LocalRotation")
-                if cur and __sa_temp_quat then
-                    local key = entry.name or tostring(i)
-                    local s = _sa_smoothed[key]
-                    if not s then
-                        _sa_smoothed[key] = { x = cur.x, y = cur.y, z = cur.z, w = cur.w }
-                        return
-                    end
-
-                    local sx, sy, sz, sw = quat_nlerp_t(s, cur, _sa_alpha)
-                    _sa_smoothed[key] = { x = sx, y = sy, z = sz, w = sw }
-
-                    local fx, fy, fz, fw = quat_nlerp_t(cur, _sa_smoothed[key], t)
-                    __sa_temp_quat.x = fx
-                    __sa_temp_quat.y = fy
-                    __sa_temp_quat.z = fz
-                    __sa_temp_quat.w = fw
-                    entry.joint:call("set_LocalRotation", __sa_temp_quat)
-                end
-            end)
-        end
-    end)
-
-    _sa_was_holding = true
-end)
-
 re.on_application_entry("UpdateBehavior", function()
+    if cached_is_holding then
+        if not _ha_hold_start then _ha_hold_start = os.clock() end
+    else
+        _ha_hold_start = nil
+    end
+
     if not _any_hold_anim_enabled then return end
     if not cached_weapon_id then return end
 
@@ -1083,13 +977,34 @@ re.on_application_entry("UpdateBehavior", function()
             _ha_blend_weight = math.max(0, _ha_blend_weight - dt * ramp)
             if _ha_blend_weight < 0.001 then _ha_blend_weight = 0 end
         end
+        _ha_active_start = nil
+        if _ha_breath_mfr_zeroed then
+            _acs_set_min_fit_rate(1.0)
+            _ha_breath_mfr_zeroed = false
+        end
         return
     end
 
     local want_active = cached_is_holding
-    if want_active and delay > 0 and _sa_hold_start then
-        if (now - _sa_hold_start) < delay then
+    if want_active and delay > 0 and _ha_hold_start then
+        if (now - _ha_hold_start) < delay then
             want_active = false
+        end
+    end
+
+    local breath_dur = prefs.ha_breath_duration
+    if want_active and breath_dur > 0 then
+        if not _ha_active_start then
+            _ha_active_start = now
+        end
+        if (now - _ha_active_start) >= breath_dur then
+            want_active = false
+        end
+    end
+
+    if not want_active or not cached_is_holding then
+        if not cached_is_holding then
+            _ha_active_start = nil
         end
     end
 
@@ -1099,6 +1014,15 @@ re.on_application_entry("UpdateBehavior", function()
         _ha_blend_weight = math.max(0.0, _ha_blend_weight - dt * ramp)
         if _ha_blend_weight < 0.001 then _ha_blend_weight = 0 end
     end
+
+    local should_zero_mfr = want_active and _ha_blend_weight > 0
+    if should_zero_mfr and not _ha_breath_mfr_zeroed then
+        _acs_set_min_fit_rate(0.0)
+        _ha_breath_mfr_zeroed = true
+    elseif not should_zero_mfr and _ha_breath_mfr_zeroed then
+        _acs_set_min_fit_rate(1.0)
+        _ha_breath_mfr_zeroed = false
+    end
 end)
 
 re.on_application_entry("LateUpdateBehavior", function()
@@ -1106,7 +1030,6 @@ re.on_application_entry("LateUpdateBehavior", function()
     if not cached_weapon_id then return end
 
     local enabled, force, speed, sel_layers, delay, ramp = get_hold_anim_for_key(cached_weapon_id)
-
     if not enabled then
         if _ha_was_holding and _ha_blend_weight <= 0 then
             local all_layers = get_all_motion_layers_is()
@@ -1125,6 +1048,14 @@ re.on_application_entry("LateUpdateBehavior", function()
     if sel_layers then
         for _, idx in ipairs(sel_layers) do sel_set[idx] = true end
     end
+
+    local all_layers = get_all_motion_layers_is()
+    for _, info in ipairs(all_layers) do
+        if sel_set[info.idx] and not info.name:lower():find("hold") then
+            sel_set[info.idx] = nil
+        end
+    end
+
     local has_selection = next(sel_set) ~= nil
 
     if not has_selection then return end
@@ -1156,8 +1087,6 @@ re.on_application_entry("LateUpdateBehavior", function()
         _ha_was_holding = false
     end
 end)
-
-local _steady_aim_dump = nil
 
 re.on_draw_ui(function()
     if imgui.tree_node("Iron Sights") then
@@ -1343,137 +1272,35 @@ re.on_draw_ui(function()
         -- end
 
         imgui.spacing()
-        imgui.text_colored("Steady Aim:", 0xFFFFFF00)
-        local sa_changed
-        sa_changed, steady_aim_enabled = imgui.checkbox("Enable Steady Aim", steady_aim_enabled)
+        local acs_changed, acs_new = imgui.checkbox("Enable Aim Camera Shake", prefs.enable_aim_camera_shake)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Reduces the idle sway/breathing animation while aiming")
+            imgui.set_tooltip("Toggle the camera shake effect when aiming")
         end
-        if sa_changed then
-            prefs.steady_aim = steady_aim_enabled
+        if acs_changed then
+            prefs.enable_aim_camera_shake = acs_new
             save_prefs()
+            _acs_applied = false
         end
-        local auto_changed
-        auto_changed, steady_aim_auto = imgui.checkbox("Auto Steady (when not moving)", steady_aim_auto)
+        local mfr_changed, mfr_new = imgui.checkbox("Disable Min Fit Rate", prefs.zero_min_fit_rate)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Automatically engages steady aim when aiming and not moving the camera")
+            imgui.set_tooltip("Sets _MinFitRate to 0 for all weapons (default is 1). Removes the minimum aim camera shake intensity")
         end
-        if auto_changed then
-            prefs.steady_aim_auto = steady_aim_auto
+        if mfr_changed then
+            prefs.zero_min_fit_rate = mfr_new
             save_prefs()
-        end
-        local delay_changed
-        delay_changed, steady_aim_delay = imgui.checkbox("Delay 1s (wait for hold)", steady_aim_delay)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Steady aim only activates after aiming for 1 second")
-        end
-        if delay_changed then
-            prefs.steady_aim_delay = steady_aim_delay
-            save_prefs()
-        end
-        local pause_changed
-        pause_changed, steady_aim_pause_shoot = imgui.checkbox("Pause while shooting", steady_aim_pause_shoot)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Disables steady aim briefly when firing (0.1s grace period)")
-        end
-        if pause_changed then
-            prefs.steady_aim_pause_shoot = steady_aim_pause_shoot
-            save_prefs()
-        end
-        local move_changed
-        move_changed, steady_aim_pause_move = imgui.checkbox("Pause while moving", steady_aim_pause_move)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Disables steady aim while the player is walking/running")
-        end
-        if move_changed then
-            prefs.steady_aim_pause_move = steady_aim_pause_move
-            save_prefs()
-        end
-        if steady_aim_enabled or steady_aim_auto then
-            local saa_changed
-            saa_changed, steady_aim_amount = imgui.slider_float("Sway Amount", steady_aim_amount, 0.0, 1.0, "%.2f")
-            if imgui.is_item_hovered() then
-                imgui.set_tooltip("0.0 = no sway, 1.0 = normal sway")
-            end
-            if saa_changed then
-                prefs.steady_aim_amount = steady_aim_amount
-                save_prefs()
-            end
-
-            local alpha_changed
-            alpha_changed, _sa_alpha = imgui.slider_float("Tracking Speed", _sa_alpha, 0.01, 0.5, "%.3f")
-            if imgui.is_item_hovered() then
-                imgui.set_tooltip("How fast the filter follows aim movement. Lower = smoother, higher = more responsive")
-            end
-            if alpha_changed then
-                prefs.steady_aim_alpha = _sa_alpha
-                save_prefs()
-            end
-
-            if imgui.button("Dump Aim Layers") then
-                local dump = { view_mode = cached_view_mode, is_holding = cached_is_holding, layers = {} }
-                pcall(function()
-                    local motion = get_player_motion_is()
-                    if motion then
-                        local lc = motion:call("getLayerCount")
-                        dump.layer_count = lc
-                        for li = 0, lc - 1 do
-                            pcall(function()
-                                local tl = motion:call("getLayer", li)
-                                if tl then
-                                    local info = { layer = li, running = tl:call("get_Running"), tree_empty = tl:call("get_TreeEmpty") }
-                                    if info.running and not info.tree_empty then
-                                        info.blend_mode = tl:call("get_BlendMode")
-                                        info.blend_rate = tl:call("get_BlendRate")
-                                        info.motion_id = tl:call("get_MotionID")
-                                        info.motion_bank_id = tl:call("get_MotionBankID")
-                                        info.speed = tl:call("get_Speed")
-                                        info.joint_count = tl:call("get_JointCount")
-                                        info.animated_joint_count = tl:call("get_AnimatedJointCount")
-                                        pcall(function()
-                                            local mn = tl:call("get_HighestWeightMotionNode")
-                                            if mn then info.motion_name = mn:call("get_MotionName") or "" end
-                                        end)
-                                        pcall(function()
-                                            local jd = tl:call("get_JointsData")
-                                            if jd then
-                                                info.joints_data_type = tostring(jd:get_type_definition():get_full_name())
-                                                local len = jd:call("get_Length")
-                                                info.joints_data_length = len
-                                                local sample = {}
-                                                local sample_count = math.min(len, 40)
-                                                for si = 0, sample_count - 1 do
-                                                    sample[#sample + 1] = jd:call("Get", si)
-                                                end
-                                                info.joints_data_sample = sample
-                                            end
-                                        end)
-                                        pcall(function()
-                                            local vc = tl:call("get_ValueCount")
-                                            info.value_count = vc
-                                        end)
-                                    end
-                                    dump.layers[#dump.layers + 1] = info
-                                end
-                            end)
-                        end
-                    end
-                end)
-                _steady_aim_dump = dump
-                json.dump_file("IronSights/debug_aim_layers.json", dump)
-            end
-            if _steady_aim_dump then
-                for _, l in ipairs(_steady_aim_dump.layers) do
-                    if l.running and not l.tree_empty then
-                        local label = "L" .. l.layer .. " bm=" .. tostring(l.blend_mode) .. " br=" .. string.format("%.2f", l.blend_rate or 0) .. " mot=" .. tostring(l.motion_id) .. " " .. (l.motion_name or "")
-                        imgui.text(label)
-                    end
-                end
-            end
+            _acs_applied = false
         end
 
         imgui.spacing()
         imgui.text_colored("Hold Animation:", 0xFFFFFF00)
+        local breath_changed, breath_new = imgui.drag_float("Breath Duration (s)", prefs.ha_breath_duration, 0.1, 0.0, 30.0, "%.1f")
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("How long the effect stays active after engaging. 0 = unlimited")
+        end
+        if breath_changed then
+            prefs.ha_breath_duration = breath_new
+            save_prefs()
+        end
         do
             local wkey = cached_weapon_id or dropdown_items[selected_index]
             local all_ml = get_all_motion_layers_is()
@@ -1484,6 +1311,10 @@ re.on_draw_ui(function()
             local t = _ha_blend_weight
             imgui.text(string.format("  blend: %.3f | force: %.3f -> %.3f | speed: %.3f -> %.3f | holding: %s",
                 t, dbg_force, 1.0 + (dbg_force - 1.0) * t, dbg_speed, 1.0 + (dbg_speed - 1.0) * t, tostring(cached_is_holding)))
+            imgui.text(string.format("  mfr_zeroed: %s | breath_start: %s | breath_dur: %.1f",
+                tostring(_ha_breath_mfr_zeroed),
+                _ha_active_start and string.format("%.1f ago", os.clock() - _ha_active_start) or "nil",
+                prefs.ha_breath_duration))
             if #all_ml > 0 then
                 for _, info in ipairs(all_ml) do
                     local cur_br, cur_sp = 0, 0
@@ -1504,6 +1335,7 @@ re.on_draw_ui(function()
                     if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
                     hold_anim_edits[wkey].enabled = hlock_new
                     _ha_blend_weight = 0.0
+                    _ha_active_start = nil
                     if not hlock_new then
                         for _, info in ipairs(all_ml) do
                             pcall(function()
@@ -1548,12 +1380,15 @@ re.on_draw_ui(function()
                     imgui.text("Target Layers:")
                     local layer_changed = false
                     for _, info in ipairs(all_ml) do
-                        local label = "L" .. info.idx .. " " .. (info.name ~= "" and info.name or "(unnamed)")
-                        local was_on = sel_set[info.idx] or false
-                        local chk_changed, chk_new = imgui.checkbox(label .. "##hold_layer_" .. info.idx, was_on)
-                        if chk_changed then
-                            sel_set[info.idx] = chk_new or nil
-                            layer_changed = true
+                        local is_hold = info.name:lower():find("hold")
+                        if is_hold then
+                            local label = "L" .. info.idx .. " " .. (info.name ~= "" and info.name or "(unnamed)")
+                            local was_on = sel_set[info.idx] or false
+                            local chk_changed, chk_new = imgui.checkbox(label .. "##hold_layer_" .. info.idx, was_on)
+                            if chk_changed then
+                                sel_set[info.idx] = chk_new or nil
+                                layer_changed = true
+                            end
                         end
                     end
                     if layer_changed then
@@ -1641,7 +1476,6 @@ re.on_draw_ui(function()
         imgui.same_line()
         hk_changed = hk.hotkey_setter("SFPS Modifier") or hk_changed
         hk_changed = hk.hotkey_setter("Standard FPS Toggle", is_hk_settings.use_modifier and "SFPS Modifier") or hk_changed
-        hk_changed = hk.hotkey_setter("Steady Aim Toggle") or hk_changed
         hk_changed = hk.hotkey_setter("Hold Animation Toggle") or hk_changed
         local hta_c, hta_v = imgui.checkbox("Hold to Activate##ha_hta", prefs.ha_hold_to_activate)
         if imgui.is_item_hovered() then
