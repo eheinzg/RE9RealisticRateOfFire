@@ -161,7 +161,7 @@ local function set_cover_offset(weapon_key, cover_state, x, y, z)
     save_cover_offsets()
 end
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = false, ha_breath_duration = 0, enable_aim_camera_shake = true, zero_min_fit_rate = false, perfect_focus = false, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = false, ha_breath_duration = 0, zero_min_fit_rate = false, perfect_focus = false, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true, auto_iron_sight = false }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
@@ -174,11 +174,11 @@ do
         if saved.standard_fps_mode ~= nil then prefs.standard_fps_mode = saved.standard_fps_mode end
         if saved.ha_hold_to_activate ~= nil then prefs.ha_hold_to_activate = saved.ha_hold_to_activate end
         if saved.ha_breath_duration ~= nil then prefs.ha_breath_duration = saved.ha_breath_duration end
-        if saved.enable_aim_camera_shake ~= nil then prefs.enable_aim_camera_shake = saved.enable_aim_camera_shake end
         if saved.zero_min_fit_rate ~= nil then prefs.zero_min_fit_rate = saved.zero_min_fit_rate end
         if saved.perfect_focus ~= nil then prefs.perfect_focus = saved.perfect_focus end
         if saved.sfps_disable_ads_snipers ~= nil then prefs.sfps_disable_ads_snipers = saved.sfps_disable_ads_snipers end
         if saved.muzzle_disable_ads_snipers ~= nil then prefs.muzzle_disable_ads_snipers = saved.muzzle_disable_ads_snipers end
+        if saved.auto_iron_sight ~= nil then prefs.auto_iron_sight = saved.auto_iron_sight end
     end
 end
 local function save_prefs()
@@ -390,7 +390,7 @@ local function _acs_apply()
                                 if wp then
                                     local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
                                     if acsp then
-                                        pcall(function() acsp:set_field("_EnableAimCameraShake", prefs.enable_aim_camera_shake) end)
+                                        -- pcall(function() acsp:set_field("_EnableAimCameraShake", prefs.enable_aim_camera_shake) end)
                                         if is_known then
                                             if prefs.zero_min_fit_rate then
                                                 pcall(function() acsp:set_field("_MinFitRate", 0.0) end)
@@ -797,21 +797,38 @@ local TRANSITION_ADS = 0.2
 local standard_fps_mode = prefs.standard_fps_mode
 local sfps_toggled_this_frame = false
 
+local function sync_auto_iron_sight()
+    if not prefs.auto_iron_sight then return end
+    if standard_fps_mode then
+        hide_reticle = false
+        bullet_from_muzzle = false
+    else
+        hide_reticle = true
+        bullet_from_muzzle = true
+    end
+end
+sync_auto_iron_sight()
+
 local hk = require("Hotkeys/Hotkeys")
 local IS_HK_PATH = "IronSights/hotkeys.json"
 local is_hk_default_settings = {
     use_modifier = false,
     use_pad_modifier = true,
+    use_ha_modifier = false,
+    use_pad_ha_modifier = true,
     hotkeys = {
         ["SFPS Modifier"] = "R Mouse",
         ["Standard FPS Toggle"] = "EX0",
         ["Pad SFPS Modifier"] = "LT (L2)",
         ["Pad Standard FPS Toggle"] = "",
-        ["Hold Animation Toggle"] = "",
+        ["HA Modifier"] = "",
+        ["Hold Animation Toggle"] = "T",
+        ["Pad HA Modifier"] = "LT (L2)",
+        ["Pad Hold Animation Toggle"] = "L3",
     }
 }
 local is_hk_settings = hk.recurse_def_settings(json.load_file(IS_HK_PATH) or {}, is_hk_default_settings)
-hk.setup_hotkeys(is_hk_settings.hotkeys)
+hk.setup_hotkeys(is_hk_settings.hotkeys, is_hk_default_settings.hotkeys)
 
 local sfps_toggle_was_down = false
 local ha_toggle_was_down = false
@@ -826,6 +843,7 @@ re.on_application_entry("UpdateBehavior", function()
         prefs.standard_fps_mode = standard_fps_mode
         save_prefs()
         sfps_toggled_this_frame = true
+        sync_auto_iron_sight()
     end
     sfps_toggle_was_down = is_down or false
 end)
@@ -1092,7 +1110,9 @@ end
 local _ha_hotkey_activated = false
 
 re.on_application_entry("UpdateBehavior", function()
-    local ha_down = hk.check_hotkey("Hold Animation Toggle", true)
+    local ha_kb = (not is_hk_settings.use_ha_modifier or hk.check_hotkey("HA Modifier", true)) and hk.check_hotkey("Hold Animation Toggle", true)
+    local ha_pad = (not is_hk_settings.use_pad_ha_modifier or hk.check_hotkey("Pad HA Modifier", true)) and hk.check_hotkey("Pad Hold Animation Toggle", true)
+    local ha_down = ha_kb or ha_pad
     local wkey = cached_weapon_id
 
     if prefs.ha_hold_to_activate then
@@ -1318,15 +1338,16 @@ re.on_draw_ui(function()
         if sfps_changed then
             prefs.standard_fps_mode = standard_fps_mode
             save_prefs()
+            sync_auto_iron_sight()
         end
-        local ads_sniper_c, ads_sniper_v = imgui.checkbox("Disable SFPS During ADS (Snipers)", prefs.sfps_disable_ads_snipers)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Disables Standard FPS offset when using scopes/red dots on Classic 70 and Marksman 1A")
-        end
-        if ads_sniper_c then
-            prefs.sfps_disable_ads_snipers = ads_sniper_v
-            save_prefs()
-        end
+        -- local ads_sniper_c, ads_sniper_v = imgui.checkbox("Disable SFPS During ADS (Snipers)", prefs.sfps_disable_ads_snipers)
+        -- if imgui.is_item_hovered() then
+        --     imgui.set_tooltip("Disables Standard FPS offset when using scopes/red dots on Classic 70 and Marksman 1A")
+        -- end
+        -- if ads_sniper_c then
+        --     prefs.sfps_disable_ads_snipers = ads_sniper_v
+        --     save_prefs()
+        -- end
         local muz_sniper_c, muz_sniper_v = imgui.checkbox("Disable Muzzle Spawn During ADS (Snipers)", prefs.muzzle_disable_ads_snipers)
         if imgui.is_item_hovered() then
             imgui.set_tooltip("Disables bullet-from-muzzle when using scopes/red dots on Classic 70 and Marksman 1A")
@@ -1342,10 +1363,10 @@ re.on_draw_ui(function()
             local eid_name = WEAPON_NAMES[equipped_id] or equipped_id
             local state_label = cached_fps_state and (" | " .. (COVER_STATE_LABELS[cached_fps_state] or cached_fps_state)) or ""
             imgui.text_colored("Equipped: " .. eid_name .. state_label, 0xFFFFFF00)
-            local is_sniper = equipped_id == "arm0600" or equipped_id == "arm0601"
-            imgui.text(string.format("  DBG MUZZLE: busy_ads=%s | suppressed=%s | bfm=%s | sniper=%s",
-                tostring(cached_busy_ads), tostring(_muzzle_ads_suppressed),
-                tostring(bullet_from_muzzle), tostring(is_sniper)))
+            -- local is_sniper = equipped_id == "arm0600" or equipped_id == "arm0601"
+            -- imgui.text(string.format("  DBG MUZZLE: busy_ads=%s | suppressed=%s | bfm=%s | sniper=%s",
+            --     tostring(cached_busy_ads), tostring(_muzzle_ads_suppressed),
+            --     tostring(bullet_from_muzzle), tostring(is_sniper)))
 
             if equipped_id ~= last_equipped_id then
                 for i, key in ipairs(dropdown_items) do
@@ -1470,6 +1491,21 @@ re.on_draw_ui(function()
         end
 
         imgui.separator()
+        local ais_changed, ais_new = imgui.checkbox("Auto Iron Sight Mode", prefs.auto_iron_sight)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Shows crosshair in default view; hides crosshair and enables muzzle spawn in iron sights")
+        end
+        if ais_changed then
+            prefs.auto_iron_sight = ais_new
+            save_prefs()
+            if ais_new then
+                sync_auto_iron_sight()
+            else
+                hide_reticle = prefs.hide_reticle
+                bullet_from_muzzle = prefs.bullet_from_muzzle
+            end
+        end
+        if not prefs.auto_iron_sight then
         local ret_changed
         ret_changed, hide_reticle = imgui.checkbox("Hide Reticle in First Person", hide_reticle)
         if ret_changed then
@@ -1494,6 +1530,7 @@ re.on_draw_ui(function()
                 end
             end
         end
+        end
 
         -- local mav_changed
         -- mav_changed, prefs.muzzle_all_views = imgui.checkbox("Bullets Follow Muzzle (All Views)", prefs.muzzle_all_views)
@@ -1510,37 +1547,28 @@ re.on_draw_ui(function()
         --     save_prefs()
         -- end
 
-        imgui.spacing()
-        local acs_changed, acs_new = imgui.checkbox("Enable Aim Camera Shake", prefs.enable_aim_camera_shake)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Toggle the camera shake effect when aiming")
-        end
-        if acs_changed then
-            prefs.enable_aim_camera_shake = acs_new
-            save_prefs()
-            _acs_applied = false
-        end
-        local mfr_changed, mfr_new = imgui.checkbox("Disable Min Fit Rate", prefs.zero_min_fit_rate)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Sets _MinFitRate to 0 for all weapons (default is 1). Removes the minimum aim camera shake intensity")
-        end
-        if mfr_changed then
-            prefs.zero_min_fit_rate = mfr_new
-            save_prefs()
-            _acs_applied = false
-        end
-        local pf_changed, pf_new = imgui.checkbox("Perfect Focus (Breath Hold)", prefs.perfect_focus)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("When holding breath, sets _PointRange to 100 for instant perfect aim. Reverts when breath runs out or released")
-        end
-        if pf_changed then
-            prefs.perfect_focus = pf_new
-            save_prefs()
-            if not pf_new and _ha_breath_pf_applied then
-                _acs_restore_point_range_all()
-                _ha_breath_pf_applied = false
-            end
-        end
+        -- imgui.spacing()
+        -- local mfr_changed, mfr_new = imgui.checkbox("Disable Min Fit Rate", prefs.zero_min_fit_rate)
+        -- if imgui.is_item_hovered() then
+        --     imgui.set_tooltip("Sets _MinFitRate to 0 for all weapons (default is 1). Removes the minimum aim camera shake intensity")
+        -- end
+        -- if mfr_changed then
+        --     prefs.zero_min_fit_rate = mfr_new
+        --     save_prefs()
+        --     _acs_applied = false
+        -- end
+        -- local pf_changed, pf_new = imgui.checkbox("Perfect Focus (Breath Hold)", prefs.perfect_focus)
+        -- if imgui.is_item_hovered() then
+        --     imgui.set_tooltip("When holding breath, sets _PointRange to 100 for instant perfect aim. Reverts when breath runs out or released")
+        -- end
+        -- if pf_changed then
+        --     prefs.perfect_focus = pf_new
+        --     save_prefs()
+        --     if not pf_new and _ha_breath_pf_applied then
+        --         _acs_restore_point_range_all()
+        --         _ha_breath_pf_applied = false
+        --     end
+        -- end
 
         imgui.spacing()
         imgui.text_colored("Hold Animation:", 0xFFFFFF00)
@@ -1557,16 +1585,16 @@ re.on_draw_ui(function()
             local all_ml = get_all_motion_layers_is()
 
             local wedit = wkey and hold_anim_edits[wkey] or {}
-            local dbg_force = wedit.force or 1.0
-            local dbg_speed = wedit.speed or 1.0
-            local t = _ha_blend_weight
-            imgui.text(string.format("  blend: %.3f | force: %.3f -> %.3f | speed: %.3f -> %.3f | holding: %s",
-                t, dbg_force, 1.0 + (dbg_force - 1.0) * t, dbg_speed, 1.0 + (dbg_speed - 1.0) * t, tostring(cached_is_holding)))
-            imgui.text(string.format("  mfr_zeroed: %s | pf_applied: %s | breath_start: %s | breath_dur: %.1f",
-                tostring(_ha_breath_mfr_zeroed),
-                tostring(_ha_breath_pf_applied),
-                _ha_active_start and string.format("%.1f ago", os.clock() - _ha_active_start) or "nil",
-                prefs.ha_breath_duration))
+            -- local dbg_force = wedit.force or 1.0
+            -- local dbg_speed = wedit.speed or 1.0
+            -- local t = _ha_blend_weight
+            -- imgui.text(string.format("  blend: %.3f | force: %.3f -> %.3f | speed: %.3f -> %.3f | holding: %s",
+            --     t, dbg_force, 1.0 + (dbg_force - 1.0) * t, dbg_speed, 1.0 + (dbg_speed - 1.0) * t, tostring(cached_is_holding)))
+            -- imgui.text(string.format("  mfr_zeroed: %s | pf_applied: %s | breath_start: %s | breath_dur: %.1f",
+            --     tostring(_ha_breath_mfr_zeroed),
+            --     tostring(_ha_breath_pf_applied),
+            --     _ha_active_start and string.format("%.1f ago", os.clock() - _ha_active_start) or "nil",
+            --     prefs.ha_breath_duration))
             if #all_ml > 0 then
                 for _, info in ipairs(all_ml) do
                     local cur_br, cur_sp = 0, 0
@@ -1720,7 +1748,10 @@ re.on_draw_ui(function()
         local hk_changed = false
         local wc = false
 
-        imgui.text_colored(" Keyboard and Mouse:", 0xFFFFFFAA)
+        imgui.text_colored(" Standard FPS Toggle:", 0xFFFFFFAA)
+        imgui.indent(10)
+        imgui.text("Keyboard and Mouse:")
+        imgui.indent(10)
         local mc; mc, is_hk_settings.use_modifier = imgui.checkbox("Use Modifier##is_kb_mod", is_hk_settings.use_modifier); wc = wc or mc
         if imgui.is_item_hovered() then
             imgui.set_tooltip("Require holding this button while pressing toggle")
@@ -1728,7 +1759,42 @@ re.on_draw_ui(function()
         imgui.same_line()
         hk_changed = hk.hotkey_setter("SFPS Modifier") or hk_changed
         hk_changed = hk.hotkey_setter("Standard FPS Toggle", is_hk_settings.use_modifier and "SFPS Modifier") or hk_changed
-        hk_changed = hk.hotkey_setter("Hold Animation Toggle") or hk_changed
+        imgui.unindent(10)
+        imgui.text("Gamepad:")
+        imgui.indent(10)
+        local pc; pc, is_hk_settings.use_pad_modifier = imgui.checkbox("Use Modifier##is_pad_mod", is_hk_settings.use_pad_modifier); wc = wc or pc
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Require holding this button while pressing toggle")
+        end
+        imgui.same_line()
+        hk_changed = hk.hotkey_setter("Pad SFPS Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Pad Standard FPS Toggle", is_hk_settings.use_pad_modifier and "Pad SFPS Modifier") or hk_changed
+        imgui.unindent(10)
+        imgui.unindent(10)
+
+        imgui.spacing()
+        imgui.text_colored(" Hold Animation Toggle:", 0xFFFFFFAA)
+        imgui.indent(10)
+        imgui.text("Keyboard and Mouse:")
+        imgui.indent(10)
+        local hmc; hmc, is_hk_settings.use_ha_modifier = imgui.checkbox("Use Modifier##ha_kb_mod", is_hk_settings.use_ha_modifier); wc = wc or hmc
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Require holding this button while pressing toggle")
+        end
+        imgui.same_line()
+        hk_changed = hk.hotkey_setter("HA Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Hold Animation Toggle", is_hk_settings.use_ha_modifier and "HA Modifier") or hk_changed
+        imgui.unindent(10)
+        imgui.text("Gamepad:")
+        imgui.indent(10)
+        local hpc; hpc, is_hk_settings.use_pad_ha_modifier = imgui.checkbox("Use Modifier##ha_pad_mod", is_hk_settings.use_pad_ha_modifier); wc = wc or hpc
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Require holding this button while pressing toggle")
+        end
+        imgui.same_line()
+        hk_changed = hk.hotkey_setter("Pad HA Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Pad Hold Animation Toggle", is_hk_settings.use_pad_ha_modifier and "Pad HA Modifier") or hk_changed
+        imgui.unindent(10)
         local hta_c, hta_v = imgui.checkbox("Hold to Activate##ha_hta", prefs.ha_hold_to_activate)
         if imgui.is_item_hovered() then
             imgui.set_tooltip("When checked, Hold Animation is only active while the hotkey is held down")
@@ -1737,15 +1803,7 @@ re.on_draw_ui(function()
             prefs.ha_hold_to_activate = hta_v
             save_prefs()
         end
-
-        imgui.text_colored(" Gamepad:", 0xFFFFFFAA)
-        local pc; pc, is_hk_settings.use_pad_modifier = imgui.checkbox("Use Modifier##is_pad_mod", is_hk_settings.use_pad_modifier); wc = wc or pc
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Require holding this button while pressing toggle")
-        end
-        imgui.same_line()
-        hk_changed = hk.hotkey_setter("Pad SFPS Modifier") or hk_changed
-        hk_changed = hk.hotkey_setter("Pad Standard FPS Toggle", is_hk_settings.use_pad_modifier and "Pad SFPS Modifier") or hk_changed
+        imgui.unindent(10)
 
         if hk_changed or wc then
             hk.update_hotkey_table(is_hk_settings.hotkeys)
