@@ -215,7 +215,9 @@ local _ha_breath_pf_applied = false
 local function get_hold_anim_for_key(key)
     local edit = key and hold_anim_edits[key]
     if edit and edit.enabled then
-        return true, edit.force or 1.0, edit.speed or 1.0, edit.layers, edit.delay or 0, edit.ramp or 4.0
+        local force = math.max(0, math.min(edit.force or 1.0, 10.0))
+        local speed = math.max(0, math.min(edit.speed or 1.0, 10.0))
+        return true, force, speed, edit.layers, edit.delay or 0, edit.ramp or 4.0
     end
     return false, 1.0, 1.0, nil, 0, 4.0
 end
@@ -1538,15 +1540,18 @@ re.on_draw_ui(function()
         imgui.spacing()
         imgui.separator()
         imgui.text_colored("Hold Animation:", 0xFFFFFF00)
-        local breath_changed, breath_new = imgui.drag_float("Breath Duration (s)", prefs.ha_breath_duration, 0.1, 0.0, 30.0, "%.1f")
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("How long the effect stays active after engaging. 0 = unlimited")
-        end
-        if breath_changed then
-            prefs.ha_breath_duration = breath_new
-            save_prefs()
-        end
         do
+            local breath_changed, breath_new = imgui.drag_float("Breath Duration (s)", prefs.ha_breath_duration, 0.1, 0.0, 30.0, "%.1f")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("How long the effect stays active after engaging. 0 = unlimited")
+            end
+            if breath_changed then
+                prefs.ha_breath_duration = breath_new
+                save_prefs()
+            end
+        end
+
+        --[[ Hold Animation UI commented out for release
             local wkey = cached_weapon_id or dropdown_items[selected_index]
             local all_ml = get_all_motion_layers_is()
 
@@ -1675,6 +1680,7 @@ re.on_draw_ui(function()
                 imgui.text("(no layers found)")
             end
         end
+        --]]
 
         imgui.spacing()
         imgui.separator()
