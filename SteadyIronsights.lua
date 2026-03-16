@@ -161,7 +161,7 @@ local function set_cover_offset(weapon_key, cover_state, x, y, z)
     save_cover_offsets()
 end
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = false, ha_breath_duration = 0, enable_aim_camera_shake = true, zero_min_fit_rate = false, perfect_focus = false }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = false, ha_breath_duration = 0, enable_aim_camera_shake = true, zero_min_fit_rate = false, perfect_focus = false, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
@@ -177,6 +177,8 @@ do
         if saved.enable_aim_camera_shake ~= nil then prefs.enable_aim_camera_shake = saved.enable_aim_camera_shake end
         if saved.zero_min_fit_rate ~= nil then prefs.zero_min_fit_rate = saved.zero_min_fit_rate end
         if saved.perfect_focus ~= nil then prefs.perfect_focus = saved.perfect_focus end
+        if saved.sfps_disable_ads_snipers ~= nil then prefs.sfps_disable_ads_snipers = saved.sfps_disable_ads_snipers end
+        if saved.muzzle_disable_ads_snipers ~= nil then prefs.muzzle_disable_ads_snipers = saved.muzzle_disable_ads_snipers end
     end
 end
 local function save_prefs()
@@ -712,6 +714,8 @@ local function find_muzzle_joint(gun_xf)
     return nil
 end
 
+local _muzzle_ads_suppressed = false
+
 re.on_pre_application_entry("UpdateBehavior", function()
     if not bullet_from_muzzle and not prefs.muzzle_all_views then return end
     if not prefs.muzzle_all_views and cached_view_mode ~= 1 then return end
@@ -763,6 +767,8 @@ do
                     if not bullet_from_muzzle and not prefs.muzzle_all_views then return end
                     if not prefs.muzzle_all_views and cached_view_mode ~= 1 then return end
                     if not muzzle_pos or not muzzle_rot then return end
+
+                    local pos_ptr = sdk.to_ptr(sdk.to_int64(args[3]))
 
                     local pos_ptr = sdk.to_ptr(sdk.to_int64(args[3]))
                     local rot_ptr = sdk.to_ptr(sdk.to_int64(args[4]))
@@ -952,6 +958,17 @@ re.on_pre_application_entry("LockScene", function()
         cached_busy_ads = false
     end
 
+    if prefs.muzzle_disable_ads_snipers and cached_busy_ads
+        and (cached_weapon_id == "arm0600" or cached_weapon_id == "arm0601") then
+        if not _muzzle_ads_suppressed then
+            bullet_from_muzzle = false
+            _muzzle_ads_suppressed = true
+        end
+    elseif _muzzle_ads_suppressed then
+        bullet_from_muzzle = prefs.bullet_from_muzzle
+        _muzzle_ads_suppressed = false
+    end
+
     local cam = sdk.get_primary_camera()
     if not cam then
         camera_offset_applied = false
@@ -973,7 +990,9 @@ re.on_pre_application_entry("LockScene", function()
     local ty = o and o.y or 0
     local tz = o and o.z or 0
 
-    if standard_fps_mode and is_active then
+    local sfps_blocked_by_ads = cached_busy_ads and prefs.sfps_disable_ads_snipers
+        and (cached_weapon_id == "arm0600" or cached_weapon_id == "arm0601")
+    if standard_fps_mode and is_active and not sfps_blocked_by_ads then
         tx = STANDARD_FPS_X
         ty = 0
         tz = 0
@@ -1176,7 +1195,7 @@ re.on_application_entry("UpdateBehavior", function()
         return
     end
 
-    local want_active = cached_is_holding
+    local want_active = cached_is_holding and not cached_busy_ads
     if want_active and delay > 0 and _ha_hold_start then
         if (now - _ha_hold_start) < delay then
             want_active = false
@@ -1300,6 +1319,22 @@ re.on_draw_ui(function()
             prefs.standard_fps_mode = standard_fps_mode
             save_prefs()
         end
+        local ads_sniper_c, ads_sniper_v = imgui.checkbox("Disable SFPS During ADS (Snipers)", prefs.sfps_disable_ads_snipers)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Disables Standard FPS offset when using scopes/red dots on Classic 70 and Marksman 1A")
+        end
+        if ads_sniper_c then
+            prefs.sfps_disable_ads_snipers = ads_sniper_v
+            save_prefs()
+        end
+        local muz_sniper_c, muz_sniper_v = imgui.checkbox("Disable Muzzle Spawn During ADS (Snipers)", prefs.muzzle_disable_ads_snipers)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Disables bullet-from-muzzle when using scopes/red dots on Classic 70 and Marksman 1A")
+        end
+        if muz_sniper_c then
+            prefs.muzzle_disable_ads_snipers = muz_sniper_v
+            save_prefs()
+        end
         imgui.separator()
 
         local equipped_id = cached_weapon_id
@@ -1307,6 +1342,10 @@ re.on_draw_ui(function()
             local eid_name = WEAPON_NAMES[equipped_id] or equipped_id
             local state_label = cached_fps_state and (" | " .. (COVER_STATE_LABELS[cached_fps_state] or cached_fps_state)) or ""
             imgui.text_colored("Equipped: " .. eid_name .. state_label, 0xFFFFFF00)
+            local is_sniper = equipped_id == "arm0600" or equipped_id == "arm0601"
+            imgui.text(string.format("  DBG MUZZLE: busy_ads=%s | suppressed=%s | bfm=%s | sniper=%s",
+                tostring(cached_busy_ads), tostring(_muzzle_ads_suppressed),
+                tostring(bullet_from_muzzle), tostring(is_sniper)))
 
             if equipped_id ~= last_equipped_id then
                 for i, key in ipairs(dropdown_items) do
