@@ -3,6 +3,8 @@
 
 local SETTINGS_PATH = "IronSights/ironsights.json"
 local COVER_SETTINGS_PATH = "IronSights/ironsights_cover.json"
+local STANDARD_FPS_SETTINGS_PATH = "IronSights/ironsights_standard_fps.json"
+local ARM_HAND_SETTINGS_PATH = "IronSights/arm_hand_rotation.json"
 local PREFS_PATH = "IronSights/ironsights_prefs.json"
 
 local WEAPON_NAMES = {
@@ -45,13 +47,13 @@ local last_equipped_id = nil
 local copy_all_confirm = false
 local reset_confirm = false
 local edit_mode = 1
-local EDIT_MODE_LABELS = { "Normal", "Cover Right", "Cover Left" }
-local EDIT_MODE_COVER_STATE = { nil, "CoverActionRight", "CoverActionLeft" }
+local EDIT_MODE_LABELS = { "Normal", "Cover Right", "Cover Left", "Standard FPS" }
+local EDIT_MODE_COVER_STATE = { nil, "CoverActionRight", "CoverActionLeft", "StandardFPS" }
 
 -- Per-weapon offsets: { ["arm0000"] = { x=0, y=0, z=0 }, ... }
 local DEFAULT_OFFSETS = {
     ["arm0000"]       = { x =  0.0,    y = -0.037, z = 0.0 },
-    ["arm0001"]       = { x =  0.0,    y = -0.019, z = 0.0 },
+    ["arm0001"]       = { x =  0.0,    y = -0.021, z = 0.0 },
     ["arm0003"]       = { x =  0.0,    y = -0.032, z = 0.0 },
     ["arm0004"]       = { x =  0.0,    y = -0.020, z = 0.0 },
     ["arm0005"]       = { x = -0.002,  y = -0.050, z = 0.0 },
@@ -65,7 +67,7 @@ local DEFAULT_OFFSETS = {
     ["arm0500"]       = { x =  0.0,    y = -0.055, z = 0.0 },
     ["arm0501"]       = { x =  0.0,    y = -0.044, z = 0.0 },
     ["arm0503"]       = { x = -0.045,  y = -0.026, z = 0.0 },
-    ["arm0505"]       = { x =  0.0,    y = -0.037, z = 0.0 },
+    ["arm0505"]       = { x =  0.001,    y = -0.0420, z = 0.0 },
     ["arm0600"]       = { x =  0.0,    y = -0.055, z = 0.0 },
     ["arm0601"]       = { x =  0.0,    y = -0.047, z = 0.0 },
     ["arm0700"]       = { x =  0.0,    y =  0.0,   z = 0.0 },
@@ -112,7 +114,7 @@ local DEFAULT_COVER_OFFSETS = {
     ["arm0006|CoverActionRight"] = { x = -0.005, y = -0.040, z = 0.0 },
     ["arm0006|CoverActionLeft"]  = { x =  0.005, y = -0.040, z = 0.0 },
     ["arm0007|CoverActionRight"] = { x = -0.006, y = -0.042, z = 0.0 },
-    ["arm0007|CoverActionLeft"]  = { x =  0.004, y = -0.043, z = 0.0 },
+    ["arm0007|CoverActionLeft"]  = { x =  0.006, y = -0.042, z = 0.0 },
     ["arm0100|CoverActionRight"] = { x = -0.020, y = -0.071, z = 0.0 },
     ["arm0100|CoverActionLeft"]  = { x =  0.020, y = -0.071, z = 0.0 },
     ["arm0103|CoverActionRight"] = { x = -0.019, y = -0.070, z = 0.0 },
@@ -161,7 +163,116 @@ local function set_cover_offset(weapon_key, cover_state, x, y, z)
     save_cover_offsets()
 end
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false }
+-- Per-weapon offsets when Standard FPS Mode is ON (default: x=-0.09 like STANDARD_FPS_X)
+local STANDARD_FPS_DEFAULT_X = -0.09
+local default_standard_fps_offset = { x = STANDARD_FPS_DEFAULT_X, y = 0.0, z = 0.0 }
+local default_standard_fps_offsets = {}
+for _, k in ipairs(WEAPON_KEYS) do
+    default_standard_fps_offsets[k] = { x = STANDARD_FPS_DEFAULT_X, y = 0.0, z = 0.0 }
+end
+local standard_fps_offsets = {}
+local function save_standard_fps_offsets()
+    json.dump_file(STANDARD_FPS_SETTINGS_PATH, standard_fps_offsets)
+end
+local function load_standard_fps_offsets()
+    local saved = json.load_file(STANDARD_FPS_SETTINGS_PATH)
+    if saved and type(saved) == "table" and next(saved) ~= nil then
+        standard_fps_offsets = saved
+    else
+        for k, v in pairs(default_standard_fps_offsets) do
+            standard_fps_offsets[k] = { x = v.x, y = v.y, z = v.z }
+        end
+        save_standard_fps_offsets()
+    end
+end
+load_standard_fps_offsets()
+
+local function get_standard_fps_offset(weapon_key)
+    return standard_fps_offsets[weapon_key]
+end
+local function set_standard_fps_offset(weapon_key, x, y, z)
+    standard_fps_offsets[weapon_key] = { x = x, y = y, z = z }
+    save_standard_fps_offsets()
+end
+
+-- Arm hand rotation offset (Euler degrees X,Y,Z for right hand; left mirrors)
+local arm_hand_rotation = { x = 0.0, y = 0.0, z = 0.0 }
+local arm_lower_rotation = { x = 0.0, y = 0.0, z = 0.0 }
+local function load_arm_hand_rotation()
+    local saved = json.load_file(ARM_HAND_SETTINGS_PATH)
+    if saved and type(saved) == "table" then
+        -- Legacy: file may be { x, y, z } for arm_hand only
+        if type(saved.x) == "number" then arm_hand_rotation.x = saved.x end
+        if type(saved.y) == "number" then arm_hand_rotation.y = saved.y end
+        if type(saved.z) == "number" then arm_hand_rotation.z = saved.z end
+        if saved.arm_hand_rotation and type(saved.arm_hand_rotation) == "table" then
+            if type(saved.arm_hand_rotation.x) == "number" then arm_hand_rotation.x = saved.arm_hand_rotation.x end
+            if type(saved.arm_hand_rotation.y) == "number" then arm_hand_rotation.y = saved.arm_hand_rotation.y end
+            if type(saved.arm_hand_rotation.z) == "number" then arm_hand_rotation.z = saved.arm_hand_rotation.z end
+        end
+        if saved.arm_lower_rotation and type(saved.arm_lower_rotation) == "table" then
+            if type(saved.arm_lower_rotation.x) == "number" then arm_lower_rotation.x = saved.arm_lower_rotation.x end
+            if type(saved.arm_lower_rotation.y) == "number" then arm_lower_rotation.y = saved.arm_lower_rotation.y end
+            if type(saved.arm_lower_rotation.z) == "number" then arm_lower_rotation.z = saved.arm_lower_rotation.z end
+        end
+    end
+end
+local function save_arm_hand_rotation()
+    json.dump_file(ARM_HAND_SETTINGS_PATH, {
+        arm_hand_rotation = arm_hand_rotation,
+        arm_lower_rotation = arm_lower_rotation,
+    })
+end
+load_arm_hand_rotation()
+
+local function euler_deg_to_quat(ex_deg, ey_deg, ez_deg)
+    local ex = math.rad(ex_deg)
+    local ey = math.rad(ey_deg)
+    local ez = math.rad(ez_deg)
+    local cx, sx = math.cos(ex * 0.5), math.sin(ex * 0.5)
+    local cy, sy = math.cos(ey * 0.5), math.sin(ey * 0.5)
+    local cz, sz = math.cos(ez * 0.5), math.sin(ez * 0.5)
+    return {
+        w = cx * cy * cz + sx * sy * sz,
+        x = sx * cy * cz - cx * sy * sz,
+        y = cx * sy * cz + sx * cy * sz,
+        z = cx * cy * sz - sx * sy * cz,
+    }
+end
+
+local function quat_mul(a, b)
+    return {
+        w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+        x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    }
+end
+
+local function quat_normalize(q)
+    local len = math.sqrt((q.w or 0)^2 + (q.x or 0)^2 + (q.y or 0)^2 + (q.z or 0)^2)
+    if len < 1e-8 then return { w = 1, x = 0, y = 0, z = 0 } end
+    len = 1.0 / len
+    return { w = (q.w or 0) * len, x = (q.x or 0) * len, y = (q.y or 0) * len, z = (q.z or 0) * len }
+end
+
+local function arm_hand_offset_quat_r()
+    return euler_deg_to_quat(arm_hand_rotation.x, arm_hand_rotation.y, arm_hand_rotation.z)
+end
+
+local function arm_hand_offset_quat_l()
+    return euler_deg_to_quat(-arm_hand_rotation.x, arm_hand_rotation.y, -arm_hand_rotation.z)
+end
+
+local function arm_lower_offset_quat_r()
+    return euler_deg_to_quat(arm_lower_rotation.x, arm_lower_rotation.y, arm_lower_rotation.z)
+end
+
+local function arm_lower_offset_quat_l()
+    return euler_deg_to_quat(-arm_lower_rotation.x, arm_lower_rotation.y, -arm_lower_rotation.z)
+end
+
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = true, ha_breath_duration = 3.5, zero_min_fit_rate = false, perfect_focus = true, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true, auto_iron_sight = true }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
@@ -172,6 +283,13 @@ do
         if saved.transition_out ~= nil then prefs.transition_out = saved.transition_out end
         if saved.transition_swap ~= nil then prefs.transition_swap = saved.transition_swap end
         if saved.standard_fps_mode ~= nil then prefs.standard_fps_mode = saved.standard_fps_mode end
+        if saved.ha_hold_to_activate ~= nil then prefs.ha_hold_to_activate = saved.ha_hold_to_activate end
+        if saved.ha_breath_duration ~= nil then prefs.ha_breath_duration = saved.ha_breath_duration end
+        if saved.zero_min_fit_rate ~= nil then prefs.zero_min_fit_rate = saved.zero_min_fit_rate end
+        if saved.perfect_focus ~= nil then prefs.perfect_focus = saved.perfect_focus end
+        if saved.sfps_disable_ads_snipers ~= nil then prefs.sfps_disable_ads_snipers = saved.sfps_disable_ads_snipers end
+        if saved.muzzle_disable_ads_snipers ~= nil then prefs.muzzle_disable_ads_snipers = saved.muzzle_disable_ads_snipers end
+        if saved.auto_iron_sight ~= nil then prefs.auto_iron_sight = saved.auto_iron_sight end
     end
 end
 local function save_prefs()
@@ -181,12 +299,372 @@ end
 local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
 local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
 
+local HOLD_ANIM_PATH = "IronSights/hold_anim.json"
+local HOLD_ANIM_DEFAULTS = {
+    arm0000 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.2 },
+    arm0001 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
+    arm0003 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.2 },
+    arm0004 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
+    arm0005 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
+    arm0006 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.1 },
+    arm0007 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.2 },
+    arm0100 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
+    arm0103 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.1 },
+    arm0104 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.1 },
+    arm0200 = { enabled = false },
+    arm0400_grace = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
+    arm0400_leon = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.1 },
+    arm0500 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
+    arm0501 = { enabled = false, layers = {0,1}, ramp = 2.0, speed = 0.2 },
+    arm0503 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.15 },
+    arm0505 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.15 },
+    arm0600 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.0 },
+    arm0601 = { enabled = false, layers = {0,1}, ramp = 2.5, speed = 0.0 },
+}
+local hold_anim_edits = {}
+do
+    for k, v in pairs(HOLD_ANIM_DEFAULTS) do
+        hold_anim_edits[k] = {}
+        for fk, fv in pairs(v) do hold_anim_edits[k][fk] = fv end
+    end
+    local saved = json.load_file(HOLD_ANIM_PATH)
+    if saved and type(saved) == "table" then
+        for k, v in pairs(saved) do
+            if type(v) == "table" then
+                if not hold_anim_edits[k] then hold_anim_edits[k] = {} end
+                for fk, fv in pairs(v) do hold_anim_edits[k][fk] = fv end
+            end
+        end
+    end
+end
+local function save_hold_anim() json.dump_file(HOLD_ANIM_PATH, hold_anim_edits) end
+
+local _any_hold_anim_enabled = false
+local function refresh_any_hold_anim()
+    for _, edit in pairs(hold_anim_edits) do
+        if edit.enabled then _any_hold_anim_enabled = true; return end
+    end
+    _any_hold_anim_enabled = false
+end
+refresh_any_hold_anim()
+
+local _ha_was_holding = false
+local _ha_blend_weight = 0.0
+local _ha_last_time = os.clock()
+local _ha_active_start = nil
+local _ha_breath_mfr_zeroed = false
+local _ha_breath_pf_applied = false
+
+local function get_hold_anim_for_key(key)
+    local edit = key and hold_anim_edits[key]
+    if edit and edit.enabled then
+        local force = math.max(0, math.min(edit.force or 1.0, 10.0))
+        local speed = math.max(0, math.min(edit.speed or 0.1, 10.0))
+        return true, force, speed, edit.layers, edit.delay or 0, edit.ramp or 1.5
+    end
+    return false, 1.0, 0.1, nil, 0, 1.5
+end
+
+local _acs_TYPE_WCR = sdk.typeof("app.WeaponCatalogRegister")
+local _acs_REGISTER_TYPES = {}
+do
+    for _, tn in ipairs({ "app.WeaponCatalogRegister", "chainsaw.WeaponCatalogRegister" }) do
+        local t = sdk.typeof(tn)
+        if t then _acs_REGISTER_TYPES[#_acs_REGISTER_TYPES + 1] = t end
+    end
+end
+
+local function _acs_get_scene()
+    local sm = sdk.get_native_singleton("via.SceneManager")
+    local sm_type = sm and sdk.find_type_definition("via.SceneManager")
+    return sm_type and sdk.call_native_func(sm, sm_type, "get_CurrentScene")
+end
+
+local function _acs_try_field(obj, name)
+    local r; pcall(function() r = obj:get_field(name) end); return r
+end
+
+local function _acs_try_call(obj, method)
+    local r; pcall(function() r = obj:call(method) end); return r
+end
+
+local _acs_WEAPON_ID_FIELDS = { "_WeaponID", "WeaponID", "_WeaponId" }
+
+local function _acs_get_entry_id(wd)
+    if not wd then return nil end
+    for _, f in ipairs(_acs_WEAPON_ID_FIELDS) do
+        local v = _acs_try_field(wd, f)
+        if v ~= nil then
+            local s = string.lower(tostring(v)):gsub("^%s+", ""):gsub("%s+$", "")
+            if s:match("^[%a_]+%d+$") then return s end
+        end
+    end
+end
+
+local function _acs_write_valuetype(parent_obj, offset, value)
+    for i = 0, value.type:get_valuetype_size() - 1 do
+        parent_obj:write_byte(offset + i, value:read_byte(i))
+    end
+end
+
+local _acs_point_range_originals = {}
+
+local function _acs_apply_point_range(wd, s_val, r_val, cache_key)
+    pcall(function()
+        local wp = _acs_try_field(wd, "_WeaponParameter") or _acs_try_field(wd, "WeaponParameter")
+        if not wp then return end
+        local rft = _acs_try_field(wp, "_ReticleFitParamTable") or _acs_try_field(wp, "ReticleFitParamTable")
+        if not rft then return end
+        local function apply_param(param, sub_key)
+            if not param then return end
+            local param_type = param:get_type_definition()
+            if not param_type then return end
+            local pr_field = param_type:get_field("_PointRange")
+            if not pr_field then return end
+            local pr = param:get_field("_PointRange")
+            if pr then
+                if cache_key and sub_key and not _acs_point_range_originals[sub_key] then
+                    _acs_point_range_originals[sub_key] = { s = pr.s, r = pr.r }
+                end
+                pr.s = s_val
+                pr.r = r_val
+                _acs_write_valuetype(param, pr_field:get_offset_from_base(), pr)
+            end
+        end
+        apply_param(_acs_try_field(rft, "_DefaultParam"), cache_key and (cache_key .. "_def"))
+        local cp = _acs_try_field(rft, "_CustomParams")
+        if cp then
+            local n = 0; pcall(function() n = cp:call("get_Count") end)
+            for i = 0, n - 1 do
+                pcall(function()
+                    local item = cp:call("get_Item", i)
+                    if item then apply_param(_acs_try_field(item, "_Param"), cache_key and (cache_key .. "_c" .. i)) end
+                end)
+            end
+        end
+    end)
+end
+
+local function _acs_restore_point_range(wd, cache_key)
+    pcall(function()
+        local wp = _acs_try_field(wd, "_WeaponParameter") or _acs_try_field(wd, "WeaponParameter")
+        if not wp then return end
+        local rft = _acs_try_field(wp, "_ReticleFitParamTable") or _acs_try_field(wp, "ReticleFitParamTable")
+        if not rft then return end
+        local function restore_param(param, sub_key)
+            if not param or not sub_key then return end
+            local orig = _acs_point_range_originals[sub_key]
+            if not orig then return end
+            local param_type = param:get_type_definition()
+            if not param_type then return end
+            local pr_field = param_type:get_field("_PointRange")
+            if not pr_field then return end
+            local pr = param:get_field("_PointRange")
+            if pr then
+                pr.s = orig.s
+                pr.r = orig.r
+                _acs_write_valuetype(param, pr_field:get_offset_from_base(), pr)
+            end
+        end
+        restore_param(_acs_try_field(rft, "_DefaultParam"), cache_key .. "_def")
+        local cp = _acs_try_field(rft, "_CustomParams")
+        if cp then
+            local n = 0; pcall(function() n = cp:call("get_Count") end)
+            for i = 0, n - 1 do
+                pcall(function()
+                    local item = cp:call("get_Item", i)
+                    if item then restore_param(_acs_try_field(item, "_Param"), cache_key .. "_c" .. i) end
+                end)
+            end
+        end
+    end)
+end
+
+local function _acs_find_all_catalogs()
+    local scene = _acs_get_scene()
+    if not scene then return {} end
+    local results = {}
+    local seen = {}
+    pcall(function()
+        local obj = scene:call("findGameObject(System.String)", "WeaponCatalog")
+        if obj then
+            local addr = obj:get_address()
+            if not seen[addr] then
+                seen[addr] = true
+                results[#results + 1] = obj
+            end
+        end
+    end)
+    if _acs_TYPE_WCR then
+        pcall(function()
+            local all = scene:call("findComponents(System.Type)", _acs_TYPE_WCR)
+            if all then
+                local n = 0; pcall(function() n = all:call("get_Count") end)
+                for i = 0, n - 1 do
+                    pcall(function()
+                        local comp = all:call("get_Item", i)
+                        if comp then
+                            local go = comp:call("get_GameObject")
+                            if go then
+                                local addr = go:get_address()
+                                if not seen[addr] then
+                                    seen[addr] = true
+                                    results[#results + 1] = go
+                                end
+                            end
+                        end
+                    end)
+                end
+            end
+        end)
+    end
+    return results
+end
+
+local function _acs_get_data_table(catalog)
+    if not catalog then return nil end
+    local reg
+    for _, t in ipairs(_acs_REGISTER_TYPES) do
+        reg = catalog:call("getComponent(System.Type)", t)
+        if reg then break end
+    end
+    if not reg then return nil end
+    local ud = _acs_try_field(reg, "_WeaponEquipParamCatalogUserData")
+        or _acs_try_call(reg, "get_WeaponEquipParamCatalogUserData")
+        or _acs_try_field(reg, "_PlayerWeaponParameterUserData")
+        or _acs_try_call(reg, "get_PlayerWeaponParameterUserData")
+        or _acs_try_field(reg, "_WeaponCatalogUserData")
+    if not ud then return nil end
+    local dt = _acs_try_field(ud, "_DataTable") or _acs_try_field(ud, "_WeaponEquipParams") or _acs_try_call(ud, "get_DataTable")
+    if dt then return dt end
+    local cd = _acs_try_field(ud, "_CatalogData")
+    if cd then return _acs_try_field(cd, "_DataTable") or _acs_try_field(cd, "_WeaponEquipParams") or _acs_try_call(cd, "get_DataTable") end
+    return nil
+end
+
+local function _acs_apply()
+    local catalogs = _acs_find_all_catalogs()
+    for _, catalog in ipairs(catalogs) do
+        local dt = _acs_get_data_table(catalog)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                pcall(function()
+                    local wd = dt:call("get_Item", i)
+                    if wd then
+                        local wid = _acs_get_entry_id(wd)
+                        local is_known = wid and WEAPON_NAMES[wid]
+                        local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
+                        if wp then
+                            local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
+                            if acsp then
+                                if is_known then
+                                    if prefs.zero_min_fit_rate then
+                                        pcall(function() acsp:set_field("_MinFitRate", 0.0) end)
+                                    else
+                                        pcall(function() acsp:set_field("_MinFitRate", 1.0) end)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+    end
+end
+
+local _acs_applied = false
+
+local function _acs_set_min_fit_rate(value)
+    local catalogs = _acs_find_all_catalogs()
+    for _, catalog in ipairs(catalogs) do
+        local dt = _acs_get_data_table(catalog)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                pcall(function()
+                    local wd = dt:call("get_Item", i)
+                    if wd then
+                        local wid = _acs_get_entry_id(wd)
+                        if wid and WEAPON_NAMES[wid] then
+                            local wp = _acs_try_field(wd, "WeaponParameter") or _acs_try_field(wd, "_WeaponParameter")
+                            if wp then
+                                local acsp = _acs_try_field(wp, "_AimCameraShakeParam") or _acs_try_field(wp, "AimCameraShakeParam")
+                                if acsp then
+                                    pcall(function() acsp:set_field("_MinFitRate", value) end)
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+    end
+end
+
+local function _acs_set_point_range_all(s_val, r_val)
+    local catalogs = _acs_find_all_catalogs()
+    for _, catalog in ipairs(catalogs) do
+        local dt = _acs_get_data_table(catalog)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                pcall(function()
+                    local wd = dt:call("get_Item", i)
+                    if wd then
+                        local wid = _acs_get_entry_id(wd)
+                        if wid and WEAPON_NAMES[wid] then
+                            _acs_apply_point_range(wd, s_val, r_val, wid)
+                        end
+                    end
+                end)
+            end
+        end
+    end
+end
+
+local function _acs_restore_point_range_all()
+    local catalogs = _acs_find_all_catalogs()
+    for _, catalog in ipairs(catalogs) do
+        local dt = _acs_get_data_table(catalog)
+        if dt then
+            local count = 0; pcall(function() count = dt:call("get_Count") end)
+            for i = 0, count - 1 do
+                pcall(function()
+                    local wd = dt:call("get_Item", i)
+                    if wd then
+                        local wid = _acs_get_entry_id(wd)
+                        if wid and WEAPON_NAMES[wid] then
+                            _acs_restore_point_range(wd, wid)
+                        end
+                    end
+                end)
+            end
+        end
+    end
+end
+
+re.on_pre_application_entry("LockScene", function()
+    if _acs_applied then return end
+    _acs_apply()
+    _acs_applied = true
+end)
+
+sdk.hook(
+    sdk.find_type_definition("via.SceneManager"):get_method("begin_change_sceneByString"),
+    function() _acs_applied = false; return sdk.PreHookResult.CALL_ORIGINAL end,
+    nil
+)
+
 -- UI state for the currently selected weapon's sliders
 local ui_offset = { x = 0.0, y = 0.0, z = 0.0 }
 
 local function populate_ui(key, cover_state)
     local o
-    if cover_state then
+    if cover_state == "StandardFPS" then
+        o = get_standard_fps_offset(key) or default_standard_fps_offsets[key] or default_standard_fps_offset
+    elseif cover_state then
         o = get_cover_offset(key, cover_state)
     else
         o = weapon_offsets[key]
@@ -349,6 +827,58 @@ local function find_muzzle_joint(gun_xf)
     return nil
 end
 
+-- Arm hand and arm lower joints: cache and resolve from player character
+local arm_hand_cached_player_go = nil
+local joint_r_arm_hand = nil
+local joint_l_arm_hand = nil
+local joint_r_arm_lower = nil
+local joint_l_arm_lower = nil
+
+local function find_transform_with_joint(xform, joint_name)
+    if not xform then return nil end
+    local j = muzzle_safe_call(xform, "getJointByName", joint_name)
+    if j then return j end
+    -- Fallback: search children (get_Child returns first child; follow chain)
+    local child = muzzle_safe_call(xform, "get_Child")
+    local depth = 0
+    while child and depth < 16 do
+        j = muzzle_safe_call(child, "getJointByName", joint_name)
+        if j then return j end
+        child = muzzle_safe_call(child, "get_Child")
+        depth = depth + 1
+    end
+    return nil
+end
+
+local function resolve_arm_hand_joints()
+    local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
+    if not char_mgr then return end
+    local ctx = muzzle_safe_call(char_mgr, "get_PlayerContextFast")
+    if not ctx then return end
+    local player_go = muzzle_safe_call(ctx, "get_GameObject")
+    if not player_go then return end
+
+    if player_go ~= arm_hand_cached_player_go then
+        joint_r_arm_hand = nil
+        joint_l_arm_hand = nil
+        joint_r_arm_lower = nil
+        joint_l_arm_lower = nil
+        arm_hand_cached_player_go = nil
+        local xform = muzzle_safe_call(player_go, "get_Transform")
+        if xform then
+            joint_r_arm_hand = find_transform_with_joint(xform, "R_Arm_Hand")
+            joint_l_arm_hand = find_transform_with_joint(xform, "L_Arm_Hand")
+            joint_r_arm_lower = find_transform_with_joint(xform, "R_Arm_Lower")
+            joint_l_arm_lower = find_transform_with_joint(xform, "L_Arm_Lower")
+            if joint_r_arm_hand or joint_l_arm_hand or joint_r_arm_lower or joint_l_arm_lower then
+                arm_hand_cached_player_go = player_go
+            end
+        end
+    end
+end
+
+local _muzzle_ads_suppressed = false
+
 re.on_pre_application_entry("UpdateBehavior", function()
     if not bullet_from_muzzle and not prefs.muzzle_all_views then return end
     if not prefs.muzzle_all_views and cached_view_mode ~= 1 then return end
@@ -402,6 +932,8 @@ do
                     if not muzzle_pos or not muzzle_rot then return end
 
                     local pos_ptr = sdk.to_ptr(sdk.to_int64(args[3]))
+
+                    local pos_ptr = sdk.to_ptr(sdk.to_int64(args[3]))
                     local rot_ptr = sdk.to_ptr(sdk.to_int64(args[4]))
                     if not pos_ptr or not rot_ptr then return end
 
@@ -428,22 +960,41 @@ local TRANSITION_ADS = 0.2
 local standard_fps_mode = prefs.standard_fps_mode
 local sfps_toggled_this_frame = false
 
+local function sync_auto_iron_sight()
+    if not prefs.auto_iron_sight then return end
+    if standard_fps_mode then
+        hide_reticle = false
+        bullet_from_muzzle = false
+    else
+        hide_reticle = true
+        bullet_from_muzzle = true
+    end
+end
+sync_auto_iron_sight()
+
 local hk = require("Hotkeys/Hotkeys")
 local IS_HK_PATH = "IronSights/hotkeys.json"
 local is_hk_default_settings = {
     use_modifier = false,
     use_pad_modifier = true,
+    use_ha_modifier = false,
+    use_pad_ha_modifier = true,
     hotkeys = {
         ["SFPS Modifier"] = "R Mouse",
         ["Standard FPS Toggle"] = "EX0",
         ["Pad SFPS Modifier"] = "LT (L2)",
         ["Pad Standard FPS Toggle"] = "",
+        ["HA Modifier"] = "",
+        ["Hold Animation Toggle"] = "T",
+        ["Pad HA Modifier"] = "LT (L2)",
+        ["Pad Hold Animation Toggle"] = "L3",
     }
 }
 local is_hk_settings = hk.recurse_def_settings(json.load_file(IS_HK_PATH) or {}, is_hk_default_settings)
-hk.setup_hotkeys(is_hk_settings.hotkeys)
+hk.setup_hotkeys(is_hk_settings.hotkeys, is_hk_default_settings.hotkeys)
 
 local sfps_toggle_was_down = false
+local ha_toggle_was_down = false
 
 re.on_application_entry("UpdateBehavior", function()
     local kb = (not is_hk_settings.use_modifier or hk.check_hotkey("SFPS Modifier", true)) and hk.check_hotkey("Standard FPS Toggle", true)
@@ -455,6 +1006,7 @@ re.on_application_entry("UpdateBehavior", function()
         prefs.standard_fps_mode = standard_fps_mode
         save_prefs()
         sfps_toggled_this_frame = true
+        sync_auto_iron_sight()
     end
     sfps_toggle_was_down = is_down or false
 end)
@@ -587,6 +1139,17 @@ re.on_pre_application_entry("LockScene", function()
         cached_busy_ads = false
     end
 
+    if prefs.muzzle_disable_ads_snipers and cached_busy_ads
+        and (cached_weapon_id == "arm0600" or cached_weapon_id == "arm0601") then
+        if not _muzzle_ads_suppressed then
+            bullet_from_muzzle = false
+            _muzzle_ads_suppressed = true
+        end
+    elseif _muzzle_ads_suppressed then
+        bullet_from_muzzle = prefs.bullet_from_muzzle
+        _muzzle_ads_suppressed = false
+    end
+
     local cam = sdk.get_primary_camera()
     if not cam then
         camera_offset_applied = false
@@ -608,10 +1171,19 @@ re.on_pre_application_entry("LockScene", function()
     local ty = o and o.y or 0
     local tz = o and o.z or 0
 
-    if standard_fps_mode and is_active then
-        tx = STANDARD_FPS_X
-        ty = 0
-        tz = 0
+    local sfps_blocked_by_ads = cached_busy_ads and prefs.sfps_disable_ads_snipers
+        and (cached_weapon_id == "arm0600" or cached_weapon_id == "arm0601")
+    if standard_fps_mode and is_active and not sfps_blocked_by_ads then
+        local o_sfps = cached_weapon_id and get_standard_fps_offset(cached_weapon_id)
+        if o_sfps then
+            tx = o_sfps.x or STANDARD_FPS_X
+            ty = o_sfps.y or 0
+            tz = o_sfps.z or 0
+        else
+            tx = STANDARD_FPS_X
+            ty = 0
+            tz = 0
+        end
     end
 
     local override_dur = nil
@@ -666,6 +1238,361 @@ re.on_pre_application_entry("LockScene", function()
     camera_offset_applied = true
 end)
 
+local _ha_hold_start = nil
+
+local function get_player_motion_is()
+    local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
+    if not char_mgr then return nil end
+    local ctx = nil
+    pcall(function() ctx = char_mgr:call("get_PlayerContextFast") end)
+    if not ctx then return nil end
+    local go = nil
+    pcall(function() go = ctx:call("get_GameObject") end)
+    if not go then return nil end
+    local motion = nil
+    pcall(function() motion = go:call("getComponent(System.Type)", sdk.typeof("via.motion.Motion")) end)
+    return motion
+end
+
+local function get_all_motion_layers_is()
+    local motion = get_player_motion_is()
+    if not motion then return {} end
+    local layers = {}
+    pcall(function()
+        local lc = motion:call("getLayerCount")
+        for i = 0, lc - 1 do
+            pcall(function()
+                local tl = motion:call("getLayer", i)
+                if tl and tl:call("get_Running") and not tl:call("get_TreeEmpty") then
+                    local name = ""
+                    pcall(function()
+                        local mn = tl:call("get_HighestWeightMotionNode")
+                        if mn then name = mn:call("get_MotionName") or "" end
+                    end)
+                    layers[#layers + 1] = { idx = i, layer = tl, name = name }
+                end
+            end)
+        end
+    end)
+    return layers
+end
+
+local _ha_hotkey_activated = false
+local _ha_toggle_cooldown = 0.35
+local _ha_last_toggle_time = 0
+
+re.on_application_entry("UpdateBehavior", function()
+    local ha_kb = (not is_hk_settings.use_ha_modifier or hk.check_hotkey("HA Modifier", true)) and hk.check_hotkey("Hold Animation Toggle", true)
+    local ha_pad = (not is_hk_settings.use_pad_ha_modifier or hk.check_hotkey("Pad HA Modifier", true)) and hk.check_hotkey("Pad Hold Animation Toggle", true)
+    local ha_down = ha_kb or ha_pad
+    local wkey = cached_weapon_id
+    local now = os.clock()
+
+    if prefs.ha_hold_to_activate then
+        if ha_down and wkey then
+            if not _ha_hotkey_activated and (now - _ha_last_toggle_time) >= _ha_toggle_cooldown then
+                if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = { force = 1.0, speed = 0.1, ramp = 1.5 } end
+                hold_anim_edits[wkey].enabled = true
+                _ha_blend_weight = 0.0
+                _ha_active_start = nil
+                refresh_any_hold_anim()
+                save_hold_anim()
+                _ha_hotkey_activated = true
+                _ha_last_toggle_time = now
+            end
+        elseif _ha_hotkey_activated and wkey then
+            if hold_anim_edits[wkey] then
+                hold_anim_edits[wkey].enabled = false
+                local all_ml = get_all_motion_layers_is()
+                for _, info in ipairs(all_ml) do
+                    pcall(function()
+                        info.layer:call("set_BlendRate", 1.0)
+                        info.layer:call("set_Speed", 1.0)
+                    end)
+                end
+                refresh_any_hold_anim()
+                save_hold_anim()
+            end
+            if _ha_breath_mfr_zeroed then
+                _acs_set_min_fit_rate(1.0)
+                _ha_breath_mfr_zeroed = false
+            end
+            if _ha_breath_pf_applied then
+                _acs_restore_point_range_all()
+                _ha_breath_pf_applied = false
+            end
+            _ha_hotkey_activated = false
+            _ha_last_toggle_time = now
+        end
+    else
+        if ha_down and not ha_toggle_was_down and wkey and (now - _ha_last_toggle_time) >= _ha_toggle_cooldown then
+            if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = { force = 1.0, speed = 0.1, ramp = 1.5 } end
+            local new_state = not (hold_anim_edits[wkey].enabled or false)
+            hold_anim_edits[wkey].enabled = new_state
+            _ha_blend_weight = 0.0
+            _ha_active_start = nil
+            if not new_state then
+                local all_ml = get_all_motion_layers_is()
+                for _, info in ipairs(all_ml) do
+                    pcall(function()
+                        info.layer:call("set_BlendRate", 1.0)
+                        info.layer:call("set_Speed", 1.0)
+                    end)
+                end
+                if _ha_breath_mfr_zeroed then
+                    _acs_set_min_fit_rate(1.0)
+                    _ha_breath_mfr_zeroed = false
+                end
+                if _ha_breath_pf_applied then
+                    _acs_restore_point_range_all()
+                    _ha_breath_pf_applied = false
+                end
+            end
+            refresh_any_hold_anim()
+            save_hold_anim()
+            _ha_last_toggle_time = now
+        end
+    end
+    ha_toggle_was_down = ha_down or false
+end)
+
+re.on_application_entry("UpdateBehavior", function()
+    if cached_is_holding then
+        if not _ha_hold_start then _ha_hold_start = os.clock() end
+    else
+        _ha_hold_start = nil
+    end
+
+    if not _any_hold_anim_enabled then return end
+    if not cached_weapon_id then return end
+
+    local now = os.clock()
+    local dt = now - _ha_last_time
+    _ha_last_time = now
+    if dt > 0.1 then dt = 0.016 end
+    if dt <= 0 then return end
+
+    local enabled, _, _, _, delay, ramp = get_hold_anim_for_key(cached_weapon_id)
+
+    if not enabled then
+        if _ha_blend_weight > 0 then
+            _ha_blend_weight = math.max(0, _ha_blend_weight - dt * ramp)
+            if _ha_blend_weight < 0.001 then _ha_blend_weight = 0 end
+        end
+        _ha_active_start = nil
+        if _ha_breath_mfr_zeroed then
+            _acs_set_min_fit_rate(1.0)
+            _ha_breath_mfr_zeroed = false
+        end
+        if _ha_breath_pf_applied then
+            _acs_restore_point_range_all()
+            _ha_breath_pf_applied = false
+        end
+        return
+    end
+
+    local want_active = cached_is_holding and not cached_busy_ads
+    if want_active and delay > 0 and _ha_hold_start then
+        if (now - _ha_hold_start) < delay then
+            want_active = false
+        end
+    end
+
+    local breath_dur = prefs.ha_breath_duration
+    if want_active and breath_dur > 0 then
+        if not _ha_active_start then
+            _ha_active_start = now
+        end
+        if (now - _ha_active_start) >= breath_dur then
+            want_active = false
+        end
+    end
+
+    if not want_active or not cached_is_holding then
+        if not cached_is_holding then
+            _ha_active_start = nil
+        end
+    end
+
+    if want_active then
+        _ha_blend_weight = math.min(1.0, _ha_blend_weight + dt * ramp)
+    else
+        _ha_blend_weight = math.max(0.0, _ha_blend_weight - dt * ramp)
+        if _ha_blend_weight < 0.001 then _ha_blend_weight = 0 end
+    end
+
+    local should_zero_mfr = want_active and _ha_blend_weight > 0
+    if should_zero_mfr and not _ha_breath_mfr_zeroed then
+        _acs_set_min_fit_rate(0.0)
+        _ha_breath_mfr_zeroed = true
+    elseif not should_zero_mfr and _ha_breath_mfr_zeroed then
+        _acs_set_min_fit_rate(1.0)
+        _ha_breath_mfr_zeroed = false
+    end
+
+    local should_pf = prefs.perfect_focus and want_active and _ha_blend_weight > 0
+    if should_pf and not _ha_breath_pf_applied then
+        _acs_set_point_range_all(100, 100)
+        _ha_breath_pf_applied = true
+    elseif not should_pf and _ha_breath_pf_applied then
+        _acs_restore_point_range_all()
+        _ha_breath_pf_applied = false
+    end
+end)
+
+-- Arm hand rotation: apply offset after animation (R_Arm_Hand + L_Arm_Hand mirrored)
+local function arm_hand_rotation_non_zero()
+    local eps = 0.0001
+    return math.abs(arm_hand_rotation.x) > eps or math.abs(arm_hand_rotation.y) > eps or math.abs(arm_hand_rotation.z) > eps
+end
+
+local function arm_lower_rotation_non_zero()
+    local eps = 0.0001
+    return math.abs(arm_lower_rotation.x) > eps or math.abs(arm_lower_rotation.y) > eps or math.abs(arm_lower_rotation.z) > eps
+end
+
+-- Reusable quat for set_Rotation (ValueType allows direct .w/.x/.y/.z assignment; create_instance + set_field fails on value types)
+local _ah_quat_td = sdk.find_type_definition("via.Quaternion")
+local _ah_temp_quat = nil
+pcall(function()
+    if ValueType and _ah_quat_td then
+        _ah_temp_quat = ValueType.new(_ah_quat_td)
+    end
+end)
+
+local function apply_arm_hand_rotation()
+    if not arm_hand_rotation_non_zero() and not arm_lower_rotation_non_zero() then return end
+    resolve_arm_hand_joints()
+
+    local off_r = arm_hand_offset_quat_r()
+    local off_l = arm_hand_offset_quat_l()
+    local lower_r = arm_lower_offset_quat_r()
+    local lower_l = arm_lower_offset_quat_l()
+
+    local function set_joint_rotation(joint, offset_quat)
+        if not joint then return end
+        local cur = muzzle_safe_call(joint, "get_LocalRotation") or muzzle_safe_call(joint, "get_Rotation")
+        if not cur then return end
+        local final = quat_mul(cur, offset_quat)
+        final = quat_normalize(final)
+
+        pcall(function()
+            -- 1) ValueType quat: set .w/.x/.y/.z then set_Rotation/set_LocalRotation (most reliable when available)
+            if _ah_temp_quat then
+                _ah_temp_quat.w = final.w
+                _ah_temp_quat.x = final.x
+                _ah_temp_quat.y = final.y
+                _ah_temp_quat.z = final.z
+                local ok1 = pcall(function() joint:call("set_LocalRotation", _ah_temp_quat) end)
+                if ok1 then return end
+                local ok2 = pcall(function() joint:call("set_Rotation", _ah_temp_quat) end)
+                if ok2 then return end
+            end
+
+            -- 2) Modify get_Rotation result in place and pass back
+            cur.w = final.w
+            cur.x = final.x
+            cur.y = final.y
+            cur.z = final.z
+            local ok3 = pcall(function() joint:call("set_LocalRotation", cur) end)
+            if ok3 then return end
+            local ok4 = pcall(function() joint:call("set_Rotation", cur) end)
+            if ok4 then return end
+
+            -- 3) 4-float overloads (w,x,y,z then x,y,z,w)
+            pcall(function() joint:call("set_LocalRotation", final.w, final.x, final.y, final.z) end)
+            pcall(function() joint:call("set_Rotation", final.w, final.x, final.y, final.z) end)
+            pcall(function() joint:call("set_LocalRotation", final.x, final.y, final.z, final.w) end)
+            pcall(function() joint:call("set_Rotation", final.x, final.y, final.z, final.w) end)
+        end)
+    end
+
+    if arm_hand_rotation_non_zero() then
+        set_joint_rotation(joint_r_arm_hand, off_r)
+        set_joint_rotation(joint_l_arm_hand, off_l)
+    end
+    if arm_lower_rotation_non_zero() then
+        set_joint_rotation(joint_r_arm_lower, lower_r)
+        set_joint_rotation(joint_l_arm_lower, lower_l)
+    end
+end
+
+re.on_application_entry("LateUpdateBehavior", function()
+    apply_arm_hand_rotation()
+end)
+
+re.on_application_entry("LateUpdateBehavior", function()
+    if not _any_hold_anim_enabled then return end
+    if not cached_weapon_id then return end
+
+    local enabled, force, speed, sel_layers, delay, ramp = get_hold_anim_for_key(cached_weapon_id)
+    if not enabled then
+        if _ha_was_holding and _ha_blend_weight <= 0 then
+            local all_layers = get_all_motion_layers_is()
+            for _, info in ipairs(all_layers) do
+                pcall(function()
+                    info.layer:call("set_BlendRate", 1.0)
+                    info.layer:call("set_Speed", 1.0)
+                end)
+            end
+            _ha_was_holding = false
+        end
+        return
+    end
+
+    local sel_set = {}
+    if sel_layers then
+        for _, idx in ipairs(sel_layers) do sel_set[idx] = true end
+    end
+
+    local all_layers = get_all_motion_layers_is()
+    for _, info in ipairs(all_layers) do
+        if sel_set[info.idx] and not info.name:lower():find("hold") then
+            sel_set[info.idx] = nil
+        end
+    end
+
+    -- Clean install: no layers configured yet; treat as "all hold layers"
+    if next(sel_set) == nil then
+        for _, info in ipairs(all_layers) do
+            if info.name:lower():find("hold") then
+                sel_set[info.idx] = true
+            end
+        end
+    end
+
+    local has_selection = next(sel_set) ~= nil
+
+    if not has_selection then return end
+
+    if _ha_blend_weight > 0 then
+        local t = _ha_blend_weight
+        local blended_force = 1.0 + (force - 1.0) * t
+        local blended_speed = 1.0 + (speed - 1.0) * t
+        local all_layers = get_all_motion_layers_is()
+        for _, info in ipairs(all_layers) do
+            if sel_set[info.idx] then
+                pcall(function()
+                    info.layer:call("set_BlendRate", blended_force)
+                    info.layer:call("set_Speed", blended_speed)
+                end)
+            end
+        end
+        _ha_was_holding = true
+    elseif _ha_was_holding then
+        local all_layers = get_all_motion_layers_is()
+        for _, info in ipairs(all_layers) do
+            if sel_set[info.idx] then
+                pcall(function()
+                    info.layer:call("set_BlendRate", 1.0)
+                    info.layer:call("set_Speed", 1.0)
+                end)
+            end
+        end
+        _ha_was_holding = false
+    end
+end)
+
 re.on_draw_ui(function()
     if imgui.tree_node("Iron Sights") then
 
@@ -677,6 +1604,130 @@ re.on_draw_ui(function()
         if sfps_changed then
             prefs.standard_fps_mode = standard_fps_mode
             save_prefs()
+            sync_auto_iron_sight()
+        end
+        -- Standard FPS offsets: show when Standard FPS Mode is on so sliders are always visible
+        if standard_fps_mode then
+            local sfps_node_open = imgui.tree_node("Standard FPS camera offsets")
+            if sfps_node_open then
+                local sfps_key = dropdown_items[selected_index] or dropdown_items[1]
+                local sfps_o = get_standard_fps_offset(sfps_key) or default_standard_fps_offsets[sfps_key] or default_standard_fps_offset
+                local sfps_x, sfps_y, sfps_z = sfps_o.x or 0, sfps_o.y or 0, sfps_o.z or 0
+                local sx, sx_new = imgui.drag_float("Left/Right (Standard FPS)", sfps_x, 0.001, -5.0, 5.0, "%.4f")
+                if sx then sfps_x = sx_new end
+                local sy, sy_new = imgui.drag_float("Up/Down (Standard FPS)", sfps_y, 0.001, -5.0, 5.0, "%.4f")
+                if sy then sfps_y = sy_new end
+                local sz, sz_new = imgui.drag_float("Back/Forward (Standard FPS)", sfps_z, 0.001, -5.0, 5.0, "%.4f")
+                if sz then sfps_z = sz_new end
+                if sx or sy or sz then
+                    set_standard_fps_offset(sfps_key, sfps_x, sfps_y, sfps_z)
+                end
+                imgui.text("Weapon: " .. (WEAPON_NAMES[sfps_key] or sfps_key))
+                imgui.text("Uses the weapon selected in the Weapon dropdown below.")
+                imgui.tree_pop()
+            end
+        end
+        -- Arm hand rotation (R_Arm_Hand / L_Arm_Hand)
+        if imgui.tree_node("Arm hand rotation") then
+            resolve_arm_hand_joints()
+            imgui.text("L_Arm_Hand mirrors R_Arm_Hand.")
+            local ah_changed = false
+            local ax, ax_new = imgui.drag_float("X (deg)", arm_hand_rotation.x, 0.5, -180.0, 180.0, "%.1f")
+            if ax then arm_hand_rotation.x = ax_new; ah_changed = true end
+            local ay, ay_new = imgui.drag_float("Y (deg)", arm_hand_rotation.y, 0.5, -180.0, 180.0, "%.1f")
+            if ay then arm_hand_rotation.y = ay_new; ah_changed = true end
+            local az, az_new = imgui.drag_float("Z (deg)", arm_hand_rotation.z, 0.5, -180.0, 180.0, "%.1f")
+            if az then arm_hand_rotation.z = az_new; ah_changed = true end
+            if ah_changed then save_arm_hand_rotation() end
+            if imgui.button("Reset##arm_hand") then
+                arm_hand_rotation.x = 0.0
+                arm_hand_rotation.y = 0.0
+                arm_hand_rotation.z = 0.0
+                save_arm_hand_rotation()
+            end
+            if not joint_r_arm_hand and not joint_l_arm_hand then
+                imgui.text_colored("Arm hand joints not found", 0xFF00FF00)
+            end
+            imgui.tree_pop()
+        end
+        -- Arm lower rotation (R_Arm_Lower / L_Arm_Lower)
+        if imgui.tree_node("Arm lower rotation") then
+            resolve_arm_hand_joints()
+            imgui.text("L_Arm_Lower mirrors R_Arm_Lower.")
+            local al_changed = false
+            local lx, lx_new = imgui.drag_float("X (deg)##arm_lower", arm_lower_rotation.x, 0.5, -180.0, 180.0, "%.1f")
+            if lx then arm_lower_rotation.x = lx_new; al_changed = true end
+            local ly, ly_new = imgui.drag_float("Y (deg)##arm_lower", arm_lower_rotation.y, 0.5, -180.0, 180.0, "%.1f")
+            if ly then arm_lower_rotation.y = ly_new; al_changed = true end
+            local lz, lz_new = imgui.drag_float("Z (deg)##arm_lower", arm_lower_rotation.z, 0.5, -180.0, 180.0, "%.1f")
+            if lz then arm_lower_rotation.z = lz_new; al_changed = true end
+            if al_changed then save_arm_hand_rotation() end
+            if imgui.button("Reset##arm_lower") then
+                arm_lower_rotation.x = 0.0
+                arm_lower_rotation.y = 0.0
+                arm_lower_rotation.z = 0.0
+                save_arm_hand_rotation()
+            end
+            if not joint_r_arm_lower and not joint_l_arm_lower then
+                imgui.text_colored("Arm lower joints not found", 0xFF00FF00)
+            end
+            imgui.tree_pop()
+        end
+        -- local ads_sniper_c, ads_sniper_v = imgui.checkbox("Disable SFPS During ADS (Snipers)", prefs.sfps_disable_ads_snipers)
+        -- if imgui.is_item_hovered() then
+        --     imgui.set_tooltip("Disables Standard FPS offset when using scopes/red dots on Classic 70 and Marksman 1A")
+        -- end
+        -- if ads_sniper_c then
+        --     prefs.sfps_disable_ads_snipers = ads_sniper_v
+        --     save_prefs()
+        -- end
+        -- local muz_sniper_c, muz_sniper_v = imgui.checkbox("Disable Muzzle Spawn During ADS for Snipers)", prefs.muzzle_disable_ads_snipers)
+        -- if imgui.is_item_hovered() then
+        --     imgui.set_tooltip("Disables bullet-from-muzzle when using scopes/red dots on Classic 70 and Marksman 1A")
+        -- end
+        if muz_sniper_c then
+            prefs.muzzle_disable_ads_snipers = muz_sniper_v
+            save_prefs()
+        end
+        local ais_changed, ais_new = imgui.checkbox("Auto Hide Crosshair Mode", prefs.auto_iron_sight)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Shows crosshair in default view; hides crosshair and enables muzzle spawn in iron sights")
+        end
+        if ais_changed then
+            prefs.auto_iron_sight = ais_new
+            save_prefs()
+            if ais_new then
+                sync_auto_iron_sight()
+            else
+                hide_reticle = prefs.hide_reticle
+                bullet_from_muzzle = prefs.bullet_from_muzzle
+            end
+        end
+        if not prefs.auto_iron_sight then
+        local ret_changed
+        ret_changed, hide_reticle = imgui.checkbox("Hide Reticle in First Person", hide_reticle)
+        if ret_changed then
+            prefs.hide_reticle = hide_reticle
+            if not hide_reticle and bullet_from_muzzle then
+                bullet_from_muzzle = false
+                prefs.bullet_from_muzzle = false
+            end
+            save_prefs()
+        end
+        if hide_reticle then
+            local muzzle_changed
+            muzzle_changed, bullet_from_muzzle = imgui.checkbox("Spawn Bullet From Muzzle", bullet_from_muzzle)
+            if muzzle_changed then
+                prefs.bullet_from_muzzle = bullet_from_muzzle
+                save_prefs()
+            end
+            if bullet_from_muzzle then
+                -- imgui.text("  Joint: " .. muzzle_debug_joint_name)
+                if muzzle_debug_joint_name == "NOT FOUND" and muzzle_debug_all_joints ~= "" then
+                    imgui.text_colored("  All joints: " .. muzzle_debug_all_joints, 0xFF00FFFF)
+                end
+            end
+        end
         end
         imgui.separator()
 
@@ -685,6 +1736,10 @@ re.on_draw_ui(function()
             local eid_name = WEAPON_NAMES[equipped_id] or equipped_id
             local state_label = cached_fps_state and (" | " .. (COVER_STATE_LABELS[cached_fps_state] or cached_fps_state)) or ""
             imgui.text_colored("Equipped: " .. eid_name .. state_label, 0xFFFFFF00)
+            -- local is_sniper = equipped_id == "arm0600" or equipped_id == "arm0601"
+            -- imgui.text(string.format("  DBG MUZZLE: busy_ads=%s | suppressed=%s | bfm=%s | sniper=%s",
+            --     tostring(cached_busy_ads), tostring(_muzzle_ads_suppressed),
+            --     tostring(bullet_from_muzzle), tostring(is_sniper)))
 
             if equipped_id ~= last_equipped_id then
                 for i, key in ipairs(dropdown_items) do
@@ -731,7 +1786,9 @@ re.on_draw_ui(function()
             if cc then any_changed = true end
 
             if any_changed then
-                if cover_state then
+                if cover_state == "StandardFPS" then
+                    set_standard_fps_offset(key, ui_offset.x, ui_offset.y, ui_offset.z)
+                elseif cover_state then
                     set_cover_offset(key, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
                 else
                     weapon_offsets[key] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
@@ -746,7 +1803,14 @@ re.on_draw_ui(function()
             else
                 imgui.text_colored("Reset this weapon?", 0xFF00FFFF)
                 if imgui.button("Yes##reset") then
-                    if cover_state then
+                    if cover_state == "StandardFPS" then
+                        local def = default_standard_fps_offsets[key] or default_standard_fps_offset
+                        ui_offset.x = def.x
+                        ui_offset.y = def.y
+                        ui_offset.z = def.z
+                        standard_fps_offsets[key] = { x = def.x, y = def.y, z = def.z }
+                        save_standard_fps_offsets()
+                    elseif cover_state then
                         local ck = key .. "|" .. cover_state
                         local def = DEFAULT_COVER_OFFSETS[ck]
                         if def then
@@ -792,12 +1856,15 @@ re.on_draw_ui(function()
                 imgui.text_colored("Apply to all weapons?", 0xFF00FFFF)
                 if imgui.button("Yes") then
                     for _, wk in ipairs(WEAPON_KEYS) do
-                        if cover_state then
+                        if cover_state == "StandardFPS" then
+                            set_standard_fps_offset(wk, ui_offset.x, ui_offset.y, ui_offset.z)
+                        elseif cover_state then
                             set_cover_offset(wk, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
                         else
                             weapon_offsets[wk] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
                         end
                     end
+                    if cover_state == "StandardFPS" then save_standard_fps_offsets() end
                     if not cover_state then save_offsets() end
                     copy_all_confirm = false
                 end
@@ -808,48 +1875,192 @@ re.on_draw_ui(function()
             end
         end
 
-        imgui.separator()
-        local ret_changed
-        ret_changed, hide_reticle = imgui.checkbox("Hide Reticle in First Person", hide_reticle)
-        if ret_changed then
-            prefs.hide_reticle = hide_reticle
-            if not hide_reticle and bullet_from_muzzle then
-                bullet_from_muzzle = false
-                prefs.bullet_from_muzzle = false
-            end
-            save_prefs()
-        end
-        if hide_reticle then
-            local muzzle_changed
-            muzzle_changed, bullet_from_muzzle = imgui.checkbox("Spawn Bullet From Muzzle", bullet_from_muzzle)
-            if muzzle_changed then
-                prefs.bullet_from_muzzle = bullet_from_muzzle
-                save_prefs()
-            end
-            if bullet_from_muzzle then
-                -- imgui.text("  Joint: " .. muzzle_debug_joint_name)
-                if muzzle_debug_joint_name == "NOT FOUND" and muzzle_debug_all_joints ~= "" then
-                    imgui.text_colored("  All joints: " .. muzzle_debug_all_joints, 0xFF00FFFF)
-                end
-            end
-        end
 
-        local mav_changed
-        mav_changed, prefs.muzzle_all_views = imgui.checkbox("Bullets Follow Muzzle (All Views)", prefs.muzzle_all_views)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Spawn bullets from the muzzle in both first-person and third-person")
-        end
-        if mav_changed then
-            if not prefs.muzzle_all_views then
-                muzzle_joint = nil
-                muzzle_cached_gun_go = nil
-                muzzle_pos = nil
-                muzzle_rot = nil
-            end
-            save_prefs()
-        end
+        -- local mav_changed
+        -- mav_changed, prefs.muzzle_all_views = imgui.checkbox("Bullets Follow Muzzle (All Views)", prefs.muzzle_all_views)
+        -- if imgui.is_item_hovered() then
+        --     imgui.set_tooltip("Spawn bullets from the muzzle in both first-person and third-person")
+        -- end
+        -- if mav_changed then
+        --     if not prefs.muzzle_all_views then
+        --         muzzle_joint = nil
+        --         muzzle_cached_gun_go = nil
+        --         muzzle_pos = nil
+        --         muzzle_rot = nil
+        --     end
+        --     save_prefs()
+        -- end
+
+        -- imgui.spacing()
+        -- local mfr_changed, mfr_new = imgui.checkbox("Disable Min Fit Rate", prefs.zero_min_fit_rate)
+        -- if imgui.is_item_hovered() then
+        --     imgui.set_tooltip("Sets _MinFitRate to 0 for all weapons (default is 1). Removes the minimum aim camera shake intensity")
+        -- end
+        -- if mfr_changed then
+        --     prefs.zero_min_fit_rate = mfr_new
+        --     save_prefs()
+        --     _acs_applied = false
+        -- end
+        -- local pf_changed, pf_new = imgui.checkbox("Perfect Focus (Breath Hold)", prefs.perfect_focus)
+        -- if imgui.is_item_hovered() then
+        --     imgui.set_tooltip("When holding breath, sets _PointRange to 100 for instant perfect aim. Reverts when breath runs out or released")
+        -- end
+        -- if pf_changed then
+        --     prefs.perfect_focus = pf_new
+        --     save_prefs()
+        --     if not pf_new and _ha_breath_pf_applied then
+        --         _acs_restore_point_range_all()
+        --         _ha_breath_pf_applied = false
+        --     end
+        -- end
 
         imgui.spacing()
+        imgui.separator()
+        imgui.text_colored("Hold Animation:", 0xFFFFFF00)
+        do
+            local breath_changed, breath_new = imgui.drag_float("Breath Duration (s)", prefs.ha_breath_duration, 0.1, 0.0, 30.0, "%.1f")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("How long the effect stays active after engaging. 0 = unlimited")
+            end
+            if breath_changed then
+                prefs.ha_breath_duration = breath_new
+                save_prefs()
+            end
+        end
+
+        --[[ Hold Animation UI commented out for release
+            local wkey = cached_weapon_id or dropdown_items[selected_index]
+            local all_ml = get_all_motion_layers_is()
+
+            local wedit = wkey and hold_anim_edits[wkey] or {}
+            -- local dbg_force = wedit.force or 1.0
+            -- local dbg_speed = wedit.speed or 1.0
+            -- local t = _ha_blend_weight
+            -- imgui.text(string.format("  blend: %.3f | force: %.3f -> %.3f | speed: %.3f -> %.3f | holding: %s",
+            --     t, dbg_force, 1.0 + (dbg_force - 1.0) * t, dbg_speed, 1.0 + (dbg_speed - 1.0) * t, tostring(cached_is_holding)))
+            -- imgui.text(string.format("  mfr_zeroed: %s | pf_applied: %s | breath_start: %s | breath_dur: %.1f",
+            --     tostring(_ha_breath_mfr_zeroed),
+            --     tostring(_ha_breath_pf_applied),
+            --     _ha_active_start and string.format("%.1f ago", os.clock() - _ha_active_start) or "nil",
+            --     prefs.ha_breath_duration))
+            -- if #all_ml > 0 then
+            --     for _, info in ipairs(all_ml) do
+            --         local cur_br, cur_sp = 0, 0
+            --         pcall(function() cur_br = info.layer:call("get_BlendRate") end)
+            --         pcall(function() cur_sp = info.layer:call("get_Speed") end)
+            --         imgui.text(string.format("    L%d %s  BR=%.3f  Sp=%.3f", info.idx, info.name, cur_br, cur_sp))
+            --     end
+            -- end
+            if #all_ml > 0 and wkey then
+                local wedit = hold_anim_edits[wkey] or {}
+                local ha_enabled = wedit.enabled or false
+                local ha_force = wedit.force or 1.0
+                local ha_speed = wedit.speed or 1.0
+                local ha_layers = wedit.layers or {}
+
+                local hlock_changed, hlock_new = imgui.checkbox("Enable##hold_anim", ha_enabled)
+                if hlock_changed then
+                    if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
+                    hold_anim_edits[wkey].enabled = hlock_new
+                    _ha_blend_weight = 0.0
+                    _ha_active_start = nil
+                    if not hlock_new then
+                        for _, info in ipairs(all_ml) do
+                            pcall(function()
+                                info.layer:call("set_BlendRate", 1.0)
+                                info.layer:call("set_Speed", 1.0)
+                            end)
+                        end
+                        hold_anim_edits[wkey].layers = {}
+                    end
+                    ha_enabled = hlock_new
+                    refresh_any_hold_anim()
+                    save_hold_anim()
+                end
+
+                if ha_enabled then
+                    local delay_val = wedit.delay or 0
+                    if type(delay_val) == "boolean" then delay_val = delay_val and 1.0 or 0 end
+                    local delay_changed, delay_new = imgui.drag_float("Delay (s)##hold_anim_delay", delay_val, 0.05, 0.0, 5.0, "%.2f")
+                    if imgui.is_item_hovered() then
+                        imgui.set_tooltip("Seconds to wait after aiming before applying overrides. 0 = no delay")
+                    end
+                    if delay_changed then
+                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
+                        hold_anim_edits[wkey].delay = delay_new
+                        save_hold_anim()
+                    end
+
+                    local ramp_val = wedit.ramp or 4.0
+                    local ramp_changed, ramp_new = imgui.drag_float("Ramp Speed##hold_anim_ramp", ramp_val, 0.1, 0.5, 30.0, "%.1f")
+                    if imgui.is_item_hovered() then
+                        imgui.set_tooltip("How fast the override blends in/out. Higher = faster. 4.0 = ~0.25s, 2.0 = ~0.5s, 10.0 = nearly instant")
+                    end
+                    if ramp_changed then
+                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
+                        hold_anim_edits[wkey].ramp = ramp_new
+                        save_hold_anim()
+                    end
+
+                    local sel_set = {}
+                    for _, idx in ipairs(ha_layers) do sel_set[idx] = true end
+
+                    imgui.text("Target Layers:")
+                    local layer_changed = false
+                    for _, info in ipairs(all_ml) do
+                        local is_hold = info.name:lower():find("hold")
+                        if is_hold then
+                            local label = "L" .. info.idx .. " " .. (info.name ~= "" and info.name or "(unnamed)")
+                            local was_on = sel_set[info.idx] or false
+                            local chk_changed, chk_new = imgui.checkbox(label .. "##hold_layer_" .. info.idx, was_on)
+                            if chk_changed then
+                                sel_set[info.idx] = chk_new or nil
+                                layer_changed = true
+                            end
+                        end
+                    end
+                    if layer_changed then
+                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
+                        local new_list = {}
+                        for _, info in ipairs(all_ml) do
+                            if sel_set[info.idx] then new_list[#new_list + 1] = info.idx end
+                        end
+                        hold_anim_edits[wkey].layers = new_list
+                        save_hold_anim()
+                    end
+
+                    local hbr_changed, hbr_new = imgui.drag_float("Hold Animation Force", ha_force, 0.01, 0.0, 1.0)
+                    if hbr_changed then
+                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
+                        hold_anim_edits[wkey].force = hbr_new
+                        for _, info in ipairs(all_ml) do
+                            if sel_set[info.idx] then
+                                pcall(function() info.layer:call("set_BlendRate", hbr_new) end)
+                            end
+                        end
+                        save_hold_anim()
+                    end
+
+                    local hspd_changed, hspd_new = imgui.drag_float("Hold Animation Speed", ha_speed, 0.1, 0.0, 100.0)
+                    if hspd_changed then
+                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
+                        hold_anim_edits[wkey].speed = hspd_new
+                        for _, info in ipairs(all_ml) do
+                            if sel_set[info.idx] then
+                                pcall(function() info.layer:call("set_Speed", hspd_new) end)
+                            end
+                        end
+                        save_hold_anim()
+                    end
+                end
+            else
+                imgui.text("(no layers found)")
+            end
+        end
+        --]]
+
+        imgui.spacing()
+        imgui.separator()
         imgui.text_colored("Transitions:", 0xFFFFFF00)
         local tin_changed
         tin_changed, TRANSITION_IN = imgui.drag_float("Aim In (sec)", TRANSITION_IN, 0.01, 0.0, 5.0, "%.2f")
@@ -882,12 +2093,17 @@ re.on_draw_ui(function()
             save_prefs()
         end
 
+        imgui.separator()
         imgui.spacing()
         imgui.text_colored("Hotkeys:", 0xFFFFFF00)
         local hk_changed = false
         local wc = false
+        imgui.separator()
 
-        imgui.text_colored(" Keyboard and Mouse:", 0xFFFFFFAA)
+        imgui.text_colored(" Standard FPS Toggle:", 0xFFFFFFAA)
+        imgui.indent(10)
+        imgui.text("Keyboard and Mouse:")
+        imgui.indent(10)
         local mc; mc, is_hk_settings.use_modifier = imgui.checkbox("Use Modifier##is_kb_mod", is_hk_settings.use_modifier); wc = wc or mc
         if imgui.is_item_hovered() then
             imgui.set_tooltip("Require holding this button while pressing toggle")
@@ -895,8 +2111,9 @@ re.on_draw_ui(function()
         imgui.same_line()
         hk_changed = hk.hotkey_setter("SFPS Modifier") or hk_changed
         hk_changed = hk.hotkey_setter("Standard FPS Toggle", is_hk_settings.use_modifier and "SFPS Modifier") or hk_changed
-
-        imgui.text_colored(" Gamepad:", 0xFFFFFFAA)
+        imgui.unindent(10)
+        imgui.text("Gamepad:")
+        imgui.indent(10)
         local pc; pc, is_hk_settings.use_pad_modifier = imgui.checkbox("Use Modifier##is_pad_mod", is_hk_settings.use_pad_modifier); wc = wc or pc
         if imgui.is_item_hovered() then
             imgui.set_tooltip("Require holding this button while pressing toggle")
@@ -904,6 +2121,42 @@ re.on_draw_ui(function()
         imgui.same_line()
         hk_changed = hk.hotkey_setter("Pad SFPS Modifier") or hk_changed
         hk_changed = hk.hotkey_setter("Pad Standard FPS Toggle", is_hk_settings.use_pad_modifier and "Pad SFPS Modifier") or hk_changed
+        imgui.unindent(10)
+        imgui.unindent(10)
+        imgui.separator()
+
+        imgui.text_colored(" Hold Animation Toggle:", 0xFFFFFFAA)
+        imgui.indent(10)
+        imgui.text("Keyboard and Mouse:")
+        imgui.indent(10)
+        local hmc; hmc, is_hk_settings.use_ha_modifier = imgui.checkbox("Use Modifier##ha_kb_mod", is_hk_settings.use_ha_modifier); wc = wc or hmc
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Require holding this button while pressing toggle")
+        end
+        imgui.same_line()
+        hk_changed = hk.hotkey_setter("HA Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Hold Animation Toggle", is_hk_settings.use_ha_modifier and "HA Modifier") or hk_changed
+        imgui.unindent(10)
+        imgui.text("Gamepad:")
+        imgui.indent(10)
+        local hpc; hpc, is_hk_settings.use_pad_ha_modifier = imgui.checkbox("Use Modifier##ha_pad_mod", is_hk_settings.use_pad_ha_modifier); wc = wc or hpc
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Require holding this button while pressing toggle")
+        end
+        imgui.same_line()
+        hk_changed = hk.hotkey_setter("Pad HA Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Pad Hold Animation Toggle", is_hk_settings.use_pad_ha_modifier and "Pad HA Modifier") or hk_changed
+        imgui.unindent(10)
+        local hta_c, hta_v = imgui.checkbox("Hold to Activate##ha_hta", prefs.ha_hold_to_activate)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("When checked, Hold Animation is only active while the hotkey is held down")
+        end
+        if hta_c then
+            prefs.ha_hold_to_activate = hta_v
+            save_prefs()
+        end
+        imgui.unindent(10)
+        imgui.separator()
 
         if hk_changed or wc then
             hk.update_hotkey_table(is_hk_settings.hotkeys)
@@ -918,5 +2171,7 @@ re.on_draw_ui(function()
         end
 
         imgui.tree_pop()
+        imgui.spacing()
+        imgui.spacing()
     end
 end)
