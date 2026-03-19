@@ -867,6 +867,9 @@ local ARM_ROT_BLEND_CLAMP_LO = -0.22
 local ARM_ROT_BLEND_CLAMP_HI = 1.22
 local ARM_ROT_SETTLE_THRESH = 0.002
 local ARM_ROT_VEL_THRESH = 0.015
+-- Initial velocity when handing off to spring: smaller for transition-in so wobble into canted is gentler
+local ARM_ROT_WOBBLE_VEL_IN = 2.0
+local ARM_ROT_WOBBLE_VEL_OUT = 5.0
 
 local function transition_update()
     local now = os.clock()
@@ -1887,7 +1890,7 @@ re.on_application_entry("LateUpdateBehavior", function()
             arm_rot_in_transition = false
             if prefs.arm_rot_wobble then
                 arm_rot_blend = (target > 0.5) and 0.9 or 0.1
-                arm_rot_velocity = (target > 0.5) and 5.0 or -5.0
+                arm_rot_velocity = (target > 0.5) and ARM_ROT_WOBBLE_VEL_IN or -ARM_ROT_WOBBLE_VEL_OUT
             else
                 arm_rot_blend = target
                 arm_rot_velocity = 0.0
@@ -2081,7 +2084,7 @@ re.on_draw_ui(function()
             end
         end
         end
-        local mfr_changed, mfr_new = imgui.checkbox("Apply min fit rate when holding breath", prefs.ha_apply_min_fit_rate)
+        local mfr_changed, mfr_new = imgui.checkbox("Steady Camera and Focus During Breath Hold", prefs.ha_apply_min_fit_rate)
         if imgui.is_item_hovered() then
             imgui.set_tooltip("When checked, holding breath applies min fit rate (camera shake) and point range (reticle fit). Uncheck to leave both unchanged during hold breath.")
         end
@@ -2255,6 +2258,7 @@ re.on_draw_ui(function()
             end
 
             if imgui.tree_node("Canted Aim") then
+                --[[ commented out for now
                 local arm_rot_changed
                 arm_rot_changed, arm_rotation_enabled = imgui.checkbox("Arm rotation adjustment", arm_rotation_enabled)
                 if imgui.is_item_hovered() then
@@ -2276,6 +2280,7 @@ re.on_draw_ui(function()
                     imgui.set_tooltip("How fast arm rotation blends out when disabled")
                 end
                 if artout_changed then prefs.arm_rot_transition_out = ARM_ROT_TRANSITION_OUT; save_prefs() end
+                --]]
                 local wobble_changed
                 wobble_changed, prefs.arm_rot_wobble = imgui.checkbox("Arm rot. wobble (overshoot effect)", prefs.arm_rot_wobble)
                 if imgui.is_item_hovered() then
@@ -2297,9 +2302,8 @@ re.on_draw_ui(function()
                 if ard_changed then prefs.arm_rot_spring_d = ARM_ROT_SPRING_D; save_prefs() end
                 end -- wobble sliders
                 -- Arm hand rotation (R_Arm_Hand / L_Arm_Hand) — per weapon
-                if imgui.tree_node("Arm hand rotation") then
+                if imgui.tree_node("Hands") then
                     resolve_arm_hand_joints()
-                    imgui.text("L_Arm_Hand mirrors R_Arm_Hand. Weapon: " .. (WEAPON_NAMES[key] or key))
                     local h = get_arm_hand_rotation(key)
                     local ax, ax_new = imgui.drag_float("X (deg)", h.x, 0.5, -180.0, 180.0, "%.1f")
                     if ax then h.x = ax_new end
@@ -2318,9 +2322,8 @@ re.on_draw_ui(function()
                     imgui.tree_pop()
                 end
                 -- Arm lower rotation (R_Arm_Lower / L_Arm_Lower) — per weapon
-                if imgui.tree_node("Arm lower rotation") then
+                if imgui.tree_node("Lower Arms") then
                     resolve_arm_hand_joints()
-                    imgui.text("L_Arm_Lower mirrors R_Arm_Lower. Weapon: " .. (WEAPON_NAMES[key] or key))
                     local l = get_arm_lower_rotation(key)
                     local lx, lx_new = imgui.drag_float("X (deg)##arm_lower", l.x, 0.5, -180.0, 180.0, "%.1f")
                     if lx then l.x = lx_new end
@@ -2339,9 +2342,8 @@ re.on_draw_ui(function()
                     imgui.tree_pop()
                 end
                 -- Arm upper rotation (R_Arm_Upper / L_Arm_Upper) — per weapon
-                if imgui.tree_node("Arm upper rotation") then
+                if imgui.tree_node("Upper Arms") then
                     resolve_arm_hand_joints()
-                    imgui.text("L_Arm_Upper mirrors R_Arm_Upper. Weapon: " .. (WEAPON_NAMES[key] or key))
                     local u = get_arm_upper_rotation(key)
                     local ux, ux_new = imgui.drag_float("X (deg)##arm_upper", u.x, 0.5, -180.0, 180.0, "%.1f")
                     if ux then u.x = ux_new end
