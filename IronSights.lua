@@ -195,34 +195,90 @@ local function set_standard_fps_offset(weapon_key, x, y, z)
     save_standard_fps_offsets()
 end
 
--- Arm hand rotation offset (Euler degrees X,Y,Z for right hand; left mirrors)
-local arm_hand_rotation = { x = 0.0, y = 0.0, z = 0.0 }
-local arm_lower_rotation = { x = 0.0, y = 0.0, z = 0.0 }
+-- Arm hand/lower/upper rotation per weapon (Euler degrees X,Y,Z for right hand; left mirrors)
+local arm_hand_rotations = {}
+local arm_lower_rotations = {}
+local arm_upper_rotations = {}
+
+local function get_arm_hand_rotation(weapon_key)
+    local t = arm_hand_rotations[weapon_key]
+    if not t then return { x = 0.0, y = 0.0, z = 0.0 } end
+    return { x = t.x or 0.0, y = t.y or 0.0, z = t.z or 0.0 }
+end
+local function get_arm_lower_rotation(weapon_key)
+    local t = arm_lower_rotations[weapon_key]
+    if not t then return { x = 0.0, y = 0.0, z = 0.0 } end
+    return { x = t.x or 0.0, y = t.y or 0.0, z = t.z or 0.0 }
+end
+local function get_arm_upper_rotation(weapon_key)
+    local t = arm_upper_rotations[weapon_key]
+    if not t then return { x = 0.0, y = 0.0, z = 0.0 } end
+    return { x = t.x or 0.0, y = t.y or 0.0, z = t.z or 0.0 }
+end
+
+local function set_arm_hand_rotation(weapon_key, x, y, z)
+    arm_hand_rotations[weapon_key] = { x = x, y = y, z = z }
+end
+local function set_arm_lower_rotation(weapon_key, x, y, z)
+    arm_lower_rotations[weapon_key] = { x = x, y = y, z = z }
+end
+local function set_arm_upper_rotation(weapon_key, x, y, z)
+    arm_upper_rotations[weapon_key] = { x = x, y = y, z = z }
+end
+
+local function save_arm_hand_rotation()
+    if _ah_off_cache_valid ~= nil then _ah_off_cache_valid = false end
+    local out = {}
+    local keys = {}
+    for k in pairs(arm_hand_rotations) do keys[k] = true end
+    for k in pairs(arm_lower_rotations) do keys[k] = true end
+    for k in pairs(arm_upper_rotations) do keys[k] = true end
+    for wkey in pairs(keys) do
+        local h = arm_hand_rotations[wkey] or { x = 0, y = 0, z = 0 }
+        local l = arm_lower_rotations[wkey] or { x = 0, y = 0, z = 0 }
+        local u = arm_upper_rotations[wkey] or { x = 0, y = 0, z = 0 }
+        out[wkey] = { arm_hand_rotation = h, arm_lower_rotation = l, arm_upper_rotation = u }
+    end
+    json.dump_file(ARM_HAND_SETTINGS_PATH, out)
+end
+
 local function load_arm_hand_rotation()
     local saved = json.load_file(ARM_HAND_SETTINGS_PATH)
-    if saved and type(saved) == "table" then
-        -- Legacy: file may be { x, y, z } for arm_hand only
-        if type(saved.x) == "number" then arm_hand_rotation.x = saved.x end
-        if type(saved.y) == "number" then arm_hand_rotation.y = saved.y end
-        if type(saved.z) == "number" then arm_hand_rotation.z = saved.z end
-        if saved.arm_hand_rotation and type(saved.arm_hand_rotation) == "table" then
-            if type(saved.arm_hand_rotation.x) == "number" then arm_hand_rotation.x = saved.arm_hand_rotation.x end
-            if type(saved.arm_hand_rotation.y) == "number" then arm_hand_rotation.y = saved.arm_hand_rotation.y end
-            if type(saved.arm_hand_rotation.z) == "number" then arm_hand_rotation.z = saved.arm_hand_rotation.z end
+    if not saved or type(saved) ~= "table" then return end
+    -- Legacy: top-level arm_hand_rotation / arm_lower_rotation / arm_upper_rotation (no per-weapon key like "arm0000")
+    local has_per_weapon = saved["arm0000"] and type(saved["arm0000"]) == "table"
+    local has_legacy_top = (saved.arm_hand_rotation and type(saved.arm_hand_rotation) == "table") or (type(saved.x) == "number")
+    if has_legacy_top and not has_per_weapon then
+        local h = saved.arm_hand_rotation and type(saved.arm_hand_rotation) == "table" and saved.arm_hand_rotation or { x = saved.x or 0, y = saved.y or 0, z = saved.z or 0 }
+        local l = saved.arm_lower_rotation and type(saved.arm_lower_rotation) == "table" and saved.arm_lower_rotation or { x = 0, y = 0, z = 0 }
+        local u = saved.arm_upper_rotation and type(saved.arm_upper_rotation) == "table" and saved.arm_upper_rotation or { x = 0, y = 0, z = 0 }
+        h.x = type(h.x) == "number" and h.x or 0; h.y = type(h.y) == "number" and h.y or 0; h.z = type(h.z) == "number" and h.z or 0
+        l.x = type(l.x) == "number" and l.x or 0; l.y = type(l.y) == "number" and l.y or 0; l.z = type(l.z) == "number" and l.z or 0
+        u.x = type(u.x) == "number" and u.x or 0; u.y = type(u.y) == "number" and u.y or 0; u.z = type(u.z) == "number" and u.z or 0
+        for _, key in ipairs(dropdown_items) do
+            arm_hand_rotations[key] = { x = h.x, y = h.y, z = h.z }
+            arm_lower_rotations[key] = { x = l.x, y = l.y, z = l.z }
+            arm_upper_rotations[key] = { x = u.x, y = u.y, z = u.z }
         end
-        if saved.arm_lower_rotation and type(saved.arm_lower_rotation) == "table" then
-            if type(saved.arm_lower_rotation.x) == "number" then arm_lower_rotation.x = saved.arm_lower_rotation.x end
-            if type(saved.arm_lower_rotation.y) == "number" then arm_lower_rotation.y = saved.arm_lower_rotation.y end
-            if type(saved.arm_lower_rotation.z) == "number" then arm_lower_rotation.z = saved.arm_lower_rotation.z end
+        save_arm_hand_rotation()
+        return
+    end
+    for wkey, entry in pairs(saved) do
+        if type(entry) == "table" and type(wkey) == "string" then
+            if entry.arm_hand_rotation and type(entry.arm_hand_rotation) == "table" then
+                local h = entry.arm_hand_rotation
+                arm_hand_rotations[wkey] = { x = type(h.x) == "number" and h.x or 0, y = type(h.y) == "number" and h.y or 0, z = type(h.z) == "number" and h.z or 0 }
+            end
+            if entry.arm_lower_rotation and type(entry.arm_lower_rotation) == "table" then
+                local l = entry.arm_lower_rotation
+                arm_lower_rotations[wkey] = { x = type(l.x) == "number" and l.x or 0, y = type(l.y) == "number" and l.y or 0, z = type(l.z) == "number" and l.z or 0 }
+            end
+            if entry.arm_upper_rotation and type(entry.arm_upper_rotation) == "table" then
+                local u = entry.arm_upper_rotation
+                arm_upper_rotations[wkey] = { x = type(u.x) == "number" and u.x or 0, y = type(u.y) == "number" and u.y or 0, z = type(u.z) == "number" and u.z or 0 }
+            end
         end
     end
-end
-local function save_arm_hand_rotation()
-    _ah_off_cache_valid = false  -- invalidate offset quat cache when user changes sliders
-    json.dump_file(ARM_HAND_SETTINGS_PATH, {
-        arm_hand_rotation = arm_hand_rotation,
-        arm_lower_rotation = arm_lower_rotation,
-    })
 end
 load_arm_hand_rotation()
 
@@ -298,20 +354,24 @@ local function quat_slerp(a, b, t)
     return _slerp_result
 end
 
-local function arm_hand_offset_quat_r()
-    return euler_deg_to_quat(arm_hand_rotation.x, arm_hand_rotation.y, arm_hand_rotation.z)
+-- Rotation table is { x, y, z } in degrees (right hand; left mirrors X and Z)
+local function arm_hand_offset_quat_r(rot)
+    return euler_deg_to_quat(rot.x, rot.y, rot.z)
 end
-
-local function arm_hand_offset_quat_l()
-    return euler_deg_to_quat(-arm_hand_rotation.x, arm_hand_rotation.y, -arm_hand_rotation.z)
+local function arm_hand_offset_quat_l(rot)
+    return euler_deg_to_quat(-rot.x, rot.y, -rot.z)
 end
-
-local function arm_lower_offset_quat_r()
-    return euler_deg_to_quat(arm_lower_rotation.x, arm_lower_rotation.y, arm_lower_rotation.z)
+local function arm_lower_offset_quat_r(rot)
+    return euler_deg_to_quat(rot.x, rot.y, rot.z)
 end
-
-local function arm_lower_offset_quat_l()
-    return euler_deg_to_quat(-arm_lower_rotation.x, arm_lower_rotation.y, -arm_lower_rotation.z)
+local function arm_lower_offset_quat_l(rot)
+    return euler_deg_to_quat(-rot.x, rot.y, -rot.z)
+end
+local function arm_upper_offset_quat_r(rot)
+    return euler_deg_to_quat(rot.x, rot.y, rot.z)
+end
+local function arm_upper_offset_quat_l(rot)
+    return euler_deg_to_quat(-rot.x, rot.y, -rot.z)
 end
 
 local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = true, ha_breath_duration = 3.5, ha_apply_min_fit_rate = true, zero_min_fit_rate = false, perfect_focus = true, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true, auto_iron_sight = true, arm_rotation_enabled = true, arm_rot_transition_in = 0.15, arm_rot_transition_out = 0.2, arm_rot_spring_k = 1000.0, arm_rot_spring_d = 20.0, arm_rot_wobble = true }
@@ -919,6 +979,8 @@ local joint_r_arm_hand = nil
 local joint_l_arm_hand = nil
 local joint_r_arm_lower = nil
 local joint_l_arm_lower = nil
+local joint_r_arm_upper = nil
+local joint_l_arm_upper = nil
 
 local function find_transform_with_joint(xform, joint_name)
     if not xform then return nil end
@@ -956,6 +1018,8 @@ local function resolve_arm_hand_joints()
         joint_l_arm_hand = nil
         joint_r_arm_lower = nil
         joint_l_arm_lower = nil
+        joint_r_arm_upper = nil
+        joint_l_arm_upper = nil
         arm_hand_cached_player_go = nil
         local xform = muzzle_safe_call(player_go, "get_Transform")
         if xform then
@@ -963,7 +1027,9 @@ local function resolve_arm_hand_joints()
             joint_l_arm_hand = find_transform_with_joint(xform, "L_Arm_Hand")
             joint_r_arm_lower = find_transform_with_joint(xform, "R_Arm_Lower")
             joint_l_arm_lower = find_transform_with_joint(xform, "L_Arm_Lower")
-            if joint_r_arm_hand or joint_l_arm_hand or joint_r_arm_lower or joint_l_arm_lower then
+            joint_r_arm_upper = find_transform_with_joint(xform, "R_Arm_Upper")
+            joint_l_arm_upper = find_transform_with_joint(xform, "L_Arm_Upper")
+            if joint_r_arm_hand or joint_l_arm_hand or joint_r_arm_lower or joint_l_arm_lower or joint_r_arm_upper or joint_l_arm_upper then
                 arm_hand_cached_player_go = player_go
             end
         end
@@ -1145,6 +1211,14 @@ local cached_is_holding = false
 local cached_fps_state = nil
 local cached_busy_ads = false
 local cached_is_hold_end_request = false
+
+-- Blend (0..1) for applying canted offset; when hold flag is false we decay this so offset interpolates to zero instead of snapping
+local ah_hold_apply_blend = 1.0
+local ah_hold_apply_last_time = 0.0
+local AH_HOLD_APPLY_RATE = 10.0  -- blend in/out over ~0.1s
+-- Blend (0..1) for canted in cover; when in cover we decay so canted interpolates to zero instead of snapping
+local ah_cover_apply_blend = 1.0
+local AH_COVER_APPLY_RATE = 10.0  -- blend in/out over ~0.1s
 
 local function get_player_context()
     local cm = sdk.get_managed_singleton("app.CharacterManager")
@@ -1631,15 +1705,9 @@ re.on_application_entry("UpdateBehavior", function()
     end
 end)
 
--- Arm hand rotation: apply offset after animation (R_Arm_Hand + L_Arm_Hand mirrored)
-local function arm_hand_rotation_non_zero()
+local function arm_rotation_non_zero(rot)
     local eps = 0.0001
-    return math.abs(arm_hand_rotation.x) > eps or math.abs(arm_hand_rotation.y) > eps or math.abs(arm_hand_rotation.z) > eps
-end
-
-local function arm_lower_rotation_non_zero()
-    local eps = 0.0001
-    return math.abs(arm_lower_rotation.x) > eps or math.abs(arm_lower_rotation.y) > eps or math.abs(arm_lower_rotation.z) > eps
+    return math.abs(rot.x) > eps or math.abs(rot.y) > eps or math.abs(rot.z) > eps
 end
 
 -- Cache method objects for joint get/set (avoids string lookup per call)
@@ -1657,7 +1725,7 @@ local arm_rot_identity_quat = { w = 1.0, x = 0.0, y = 0.0, z = 0.0 }
 
 -- Cache base offset quats (avoid 4x euler_deg_to_quat per frame); invalidated by save_arm_hand_rotation
 local _ah_off_cache_valid = false
-local _ah_cached_off_r, _ah_cached_off_l, _ah_cached_lower_r, _ah_cached_lower_l
+local _ah_cached_off_r, _ah_cached_off_l, _ah_cached_lower_r, _ah_cached_lower_l, _ah_cached_upper_r, _ah_cached_upper_l
 
 local function _ah_set_joint_rotation(joint, off)
     if not joint then return end
@@ -1699,24 +1767,40 @@ local _ah_slerp_r = { w = 1, x = 0, y = 0, z = 0 }
 local _ah_slerp_l = { w = 1, x = 0, y = 0, z = 0 }
 local _ah_slerp_lr = { w = 1, x = 0, y = 0, z = 0 }
 local _ah_slerp_ll = { w = 1, x = 0, y = 0, z = 0 }
+local _ah_slerp_ur = { w = 1, x = 0, y = 0, z = 0 }
+local _ah_slerp_ul = { w = 1, x = 0, y = 0, z = 0 }
+
+local function is_in_cover_state()
+    if not cached_fps_state then return false end
+    for _, cs in ipairs(COVER_STATES) do
+        if cached_fps_state == cs then return true end
+    end
+    return false
+end
 
 local function apply_arm_hand_rotation()
     if arm_rot_blend <= 0 then return end
-    if not cached_is_hold_end_request then return end
-    local hand_nz = arm_hand_rotation_non_zero()
-    local lower_nz = arm_lower_rotation_non_zero()
-    if not hand_nz and not lower_nz then return end
+    if not cached_weapon_id then return end
+    -- Blend canted out when in cover (ah_cover_apply_blend is updated in LateUpdateBehavior)
+    local effective_blend = arm_rot_blend * ah_hold_apply_blend * ah_cover_apply_blend
+    if effective_blend <= 0 then return end
+    local hand_rot = get_arm_hand_rotation(cached_weapon_id)
+    local lower_rot = get_arm_lower_rotation(cached_weapon_id)
+    local upper_rot = get_arm_upper_rotation(cached_weapon_id)
+    local hand_nz = arm_rotation_non_zero(hand_rot)
+    local lower_nz = arm_rotation_non_zero(lower_rot)
+    local upper_nz = arm_rotation_non_zero(upper_rot)
+    if not hand_nz and not lower_nz and not upper_nz then return end
     resolve_arm_hand_joints()
 
-    if not _ah_off_cache_valid then
-        _ah_cached_off_r = arm_hand_offset_quat_r()
-        _ah_cached_off_l = arm_hand_offset_quat_l()
-        _ah_cached_lower_r = arm_lower_offset_quat_r()
-        _ah_cached_lower_l = arm_lower_offset_quat_l()
-        _ah_off_cache_valid = true
-    end
+    _ah_cached_off_r = arm_hand_offset_quat_r(hand_rot)
+    _ah_cached_off_l = arm_hand_offset_quat_l(hand_rot)
+    _ah_cached_lower_r = arm_lower_offset_quat_r(lower_rot)
+    _ah_cached_lower_l = arm_lower_offset_quat_l(lower_rot)
+    _ah_cached_upper_r = arm_upper_offset_quat_r(upper_rot)
+    _ah_cached_upper_l = arm_upper_offset_quat_l(upper_rot)
 
-    local blend = arm_rot_blend
+    local blend = effective_blend
     if blend == 1.0 then
         if hand_nz then
             _ah_set_joint_rotation(joint_r_arm_hand, _ah_cached_off_r)
@@ -1725,6 +1809,10 @@ local function apply_arm_hand_rotation()
         if lower_nz then
             _ah_set_joint_rotation(joint_r_arm_lower, _ah_cached_lower_r)
             _ah_set_joint_rotation(joint_l_arm_lower, _ah_cached_lower_l)
+        end
+        if upper_nz then
+            _ah_set_joint_rotation(joint_r_arm_upper, _ah_cached_upper_r)
+            _ah_set_joint_rotation(joint_l_arm_upper, _ah_cached_upper_l)
         end
         return
     end
@@ -1745,9 +1833,33 @@ local function apply_arm_hand_rotation()
         _ah_set_joint_rotation(joint_r_arm_lower, _ah_slerp_lr)
         _ah_set_joint_rotation(joint_l_arm_lower, _ah_slerp_ll)
     end
+    if upper_nz then
+        local q = quat_slerp(arm_rot_identity_quat, _ah_cached_upper_r, blend)
+        _ah_slerp_ur.w = q.w; _ah_slerp_ur.x = q.x; _ah_slerp_ur.y = q.y; _ah_slerp_ur.z = q.z
+        q = quat_slerp(arm_rot_identity_quat, _ah_cached_upper_l, blend)
+        _ah_slerp_ul.w = q.w; _ah_slerp_ul.x = q.x; _ah_slerp_ul.y = q.y; _ah_slerp_ul.z = q.z
+        _ah_set_joint_rotation(joint_r_arm_upper, _ah_slerp_ur)
+        _ah_set_joint_rotation(joint_l_arm_upper, _ah_slerp_ul)
+    end
 end
 
 re.on_application_entry("LateUpdateBehavior", function()
+    local now = os.clock()
+    local dt_hold = now - ah_hold_apply_last_time
+    if dt_hold < 0 then dt_hold = 0 end
+    if dt_hold > 0.05 then dt_hold = 0.05 end
+    ah_hold_apply_last_time = now
+    if cached_is_hold_end_request then
+        ah_hold_apply_blend = math.min(1.0, ah_hold_apply_blend + dt_hold * AH_HOLD_APPLY_RATE)
+    else
+        ah_hold_apply_blend = math.max(0.0, ah_hold_apply_blend - dt_hold * AH_HOLD_APPLY_RATE)
+    end
+    if is_in_cover_state() then
+        ah_cover_apply_blend = math.max(0.0, ah_cover_apply_blend - dt_hold * AH_COVER_APPLY_RATE)
+    else
+        ah_cover_apply_blend = math.min(1.0, ah_cover_apply_blend + dt_hold * AH_COVER_APPLY_RATE)
+    end
+
     local target = arm_rotation_enabled and 1.0 or 0.0
 
     -- Fast path: already settled at target — only re-apply rotation, skip all blend math
@@ -1756,7 +1868,6 @@ re.on_application_entry("LateUpdateBehavior", function()
         return
     end
 
-    local now = os.clock()
     local dt = now - arm_rot_blend_last_time
     if dt < 0 then dt = 0 end
     arm_rot_blend_last_time = now
@@ -1914,114 +2025,6 @@ re.on_draw_ui(function()
             save_prefs()
             sync_auto_iron_sight()
         end
-        -- Standard FPS offsets: show when Standard FPS Mode is on so sliders are always visible
-        if standard_fps_mode then
-            local sfps_node_open = imgui.tree_node("Standard FPS camera offsets")
-            if sfps_node_open then
-                local sfps_key = dropdown_items[selected_index] or dropdown_items[1]
-                local sfps_o = get_standard_fps_offset(sfps_key) or default_standard_fps_offsets[sfps_key] or default_standard_fps_offset
-                local sfps_x, sfps_y, sfps_z = sfps_o.x or 0, sfps_o.y or 0, sfps_o.z or 0
-                local sx, sx_new = imgui.drag_float("Left/Right (Standard FPS)", sfps_x, 0.001, -5.0, 5.0, "%.4f")
-                if sx then sfps_x = sx_new end
-                local sy, sy_new = imgui.drag_float("Up/Down (Standard FPS)", sfps_y, 0.001, -5.0, 5.0, "%.4f")
-                if sy then sfps_y = sy_new end
-                local sz, sz_new = imgui.drag_float("Back/Forward (Standard FPS)", sfps_z, 0.001, -5.0, 5.0, "%.4f")
-                if sz then sfps_z = sz_new end
-                if sx or sy or sz then
-                    set_standard_fps_offset(sfps_key, sfps_x, sfps_y, sfps_z)
-                end
-                imgui.text("Weapon: " .. (WEAPON_NAMES[sfps_key] or sfps_key))
-                imgui.text("Uses the weapon selected in the Weapon dropdown below.")
-                imgui.tree_pop()
-            end
-        end
-        local arm_rot_changed
-        arm_rot_changed, arm_rotation_enabled = imgui.checkbox("Arm rotation adjustment", arm_rotation_enabled)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Apply arm/hand and arm lower rotation offsets. Toggle with hotkey: rapid double-click (see Hotkeys section).")
-        end
-        if arm_rot_changed then
-            prefs.arm_rotation_enabled = arm_rotation_enabled
-            save_prefs()
-        end
-        local artin_changed
-        artin_changed, ARM_ROT_TRANSITION_IN = imgui.drag_float("Arm rot. transition in (sec)", ARM_ROT_TRANSITION_IN, 0.01, 0.0, 5.0, "%.2f")
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("How fast arm rotation blends in when enabled")
-        end
-        if artin_changed then prefs.arm_rot_transition_in = ARM_ROT_TRANSITION_IN; save_prefs() end
-        local artout_changed
-        artout_changed, ARM_ROT_TRANSITION_OUT = imgui.drag_float("Arm rot. transition out (sec)", ARM_ROT_TRANSITION_OUT, 0.01, 0.0, 5.0, "%.2f")
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("How fast arm rotation blends out when disabled")
-        end
-        if artout_changed then prefs.arm_rot_transition_out = ARM_ROT_TRANSITION_OUT; save_prefs() end
-        local wobble_changed
-        wobble_changed, prefs.arm_rot_wobble = imgui.checkbox("Arm rot. wobble (overshoot effect)", prefs.arm_rot_wobble)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Adds a realistic overshoot/oscillation after the transition ends. Disable for a clean, smooth blend.")
-        end
-        if wobble_changed then save_prefs() end
-        if prefs.arm_rot_wobble then
-        local ark_changed
-        ark_changed, ARM_ROT_SPRING_K = imgui.drag_float("Arm rot. spring stiffness (K)", ARM_ROT_SPRING_K, 1.0, 10.0, 5000.0, "%.0f")
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Higher = snappier wobble after transition")
-        end
-        if ark_changed then prefs.arm_rot_spring_k = ARM_ROT_SPRING_K; save_prefs() end
-        local ard_changed
-        ard_changed, ARM_ROT_SPRING_D = imgui.drag_float("Arm rot. spring damping (D)", ARM_ROT_SPRING_D, 0.1, 1.0, 100.0, "%.1f")
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Lower = more oscillation; higher = settles faster")
-        end
-        if ard_changed then prefs.arm_rot_spring_d = ARM_ROT_SPRING_D; save_prefs() end
-        end -- wobble sliders
-        -- Arm hand rotation (R_Arm_Hand / L_Arm_Hand)
-        if imgui.tree_node("Arm hand rotation") then
-            resolve_arm_hand_joints()
-            imgui.text("L_Arm_Hand mirrors R_Arm_Hand.")
-            local ah_changed = false
-            local ax, ax_new = imgui.drag_float("X (deg)", arm_hand_rotation.x, 0.5, -180.0, 180.0, "%.1f")
-            if ax then arm_hand_rotation.x = ax_new; ah_changed = true end
-            local ay, ay_new = imgui.drag_float("Y (deg)", arm_hand_rotation.y, 0.5, -180.0, 180.0, "%.1f")
-            if ay then arm_hand_rotation.y = ay_new; ah_changed = true end
-            local az, az_new = imgui.drag_float("Z (deg)", arm_hand_rotation.z, 0.5, -180.0, 180.0, "%.1f")
-            if az then arm_hand_rotation.z = az_new; ah_changed = true end
-            if ah_changed then save_arm_hand_rotation() end
-            if imgui.button("Reset##arm_hand") then
-                arm_hand_rotation.x = 0.0
-                arm_hand_rotation.y = 0.0
-                arm_hand_rotation.z = 0.0
-                save_arm_hand_rotation()
-            end
-            if not joint_r_arm_hand and not joint_l_arm_hand then
-                imgui.text_colored("Arm hand joints not found", 0xFF00FF00)
-            end
-            imgui.tree_pop()
-        end
-        -- Arm lower rotation (R_Arm_Lower / L_Arm_Lower)
-        if imgui.tree_node("Arm lower rotation") then
-            resolve_arm_hand_joints()
-            imgui.text("L_Arm_Lower mirrors R_Arm_Lower.")
-            local al_changed = false
-            local lx, lx_new = imgui.drag_float("X (deg)##arm_lower", arm_lower_rotation.x, 0.5, -180.0, 180.0, "%.1f")
-            if lx then arm_lower_rotation.x = lx_new; al_changed = true end
-            local ly, ly_new = imgui.drag_float("Y (deg)##arm_lower", arm_lower_rotation.y, 0.5, -180.0, 180.0, "%.1f")
-            if ly then arm_lower_rotation.y = ly_new; al_changed = true end
-            local lz, lz_new = imgui.drag_float("Z (deg)##arm_lower", arm_lower_rotation.z, 0.5, -180.0, 180.0, "%.1f")
-            if lz then arm_lower_rotation.z = lz_new; al_changed = true end
-            if al_changed then save_arm_hand_rotation() end
-            if imgui.button("Reset##arm_lower") then
-                arm_lower_rotation.x = 0.0
-                arm_lower_rotation.y = 0.0
-                arm_lower_rotation.z = 0.0
-                save_arm_hand_rotation()
-            end
-            if not joint_r_arm_lower and not joint_l_arm_lower then
-                imgui.text_colored("Arm lower joints not found", 0xFF00FF00)
-            end
-            imgui.tree_pop()
-        end
         -- local ads_sniper_c, ads_sniper_v = imgui.checkbox("Disable SFPS During ADS (Snipers)", prefs.sfps_disable_ads_snipers)
         -- if imgui.is_item_hovered() then
         --     imgui.set_tooltip("Disables Standard FPS offset when using scopes/red dots on Classic 70 and Marksman 1A")
@@ -2078,6 +2081,14 @@ re.on_draw_ui(function()
             end
         end
         end
+        local mfr_changed, mfr_new = imgui.checkbox("Apply min fit rate when holding breath", prefs.ha_apply_min_fit_rate)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("When checked, holding breath applies min fit rate (camera shake) and point range (reticle fit). Uncheck to leave both unchanged during hold breath.")
+        end
+        if mfr_changed then
+            prefs.ha_apply_min_fit_rate = mfr_new
+            save_prefs()
+        end
         imgui.separator()
 
         local equipped_id = cached_weapon_id
@@ -2125,102 +2136,230 @@ re.on_draw_ui(function()
         local key = dropdown_items[selected_index]
         local cover_state = EDIT_MODE_COVER_STATE[edit_mode]
         if key then
-            local any_changed = false
-            local cc
-            cc, ui_offset.x = imgui.drag_float("Left/Right", ui_offset.x, 0.001, -5.0, 5.0, "%.4f")
-            if cc then any_changed = true end
-            cc, ui_offset.y = imgui.drag_float("Up/Down", ui_offset.y, 0.001, -5.0, 5.0, "%.4f")
-            if cc then any_changed = true end
-            cc, ui_offset.z = imgui.drag_float("Back/Forward", ui_offset.z, 0.001, -5.0, 5.0, "%.4f")
-            if cc then any_changed = true end
+            if imgui.tree_node("Iron Sight Offsets") then
+                local any_changed = false
+                local cc
+                cc, ui_offset.x = imgui.drag_float("Left/Right", ui_offset.x, 0.001, -5.0, 5.0, "%.4f")
+                if cc then any_changed = true end
+                cc, ui_offset.y = imgui.drag_float("Up/Down", ui_offset.y, 0.001, -5.0, 5.0, "%.4f")
+                if cc then any_changed = true end
+                cc, ui_offset.z = imgui.drag_float("Back/Forward", ui_offset.z, 0.001, -5.0, 5.0, "%.4f")
+                if cc then any_changed = true end
 
-            if any_changed then
-                if cover_state == "StandardFPS" then
-                    set_standard_fps_offset(key, ui_offset.x, ui_offset.y, ui_offset.z)
-                elseif cover_state then
-                    set_cover_offset(key, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
-                else
-                    weapon_offsets[key] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
-                    save_offsets()
-                end
-            end
-
-            if not reset_confirm then
-                if imgui.button("Reset##offset") then
-                    reset_confirm = true
-                end
-            else
-                imgui.text_colored("Reset this weapon?", 0xFF00FFFF)
-                if imgui.button("Yes##reset") then
+                if any_changed then
                     if cover_state == "StandardFPS" then
-                        local def = default_standard_fps_offsets[key] or default_standard_fps_offset
-                        ui_offset.x = def.x
-                        ui_offset.y = def.y
-                        ui_offset.z = def.z
-                        standard_fps_offsets[key] = { x = def.x, y = def.y, z = def.z }
-                        save_standard_fps_offsets()
+                        set_standard_fps_offset(key, ui_offset.x, ui_offset.y, ui_offset.z)
                     elseif cover_state then
-                        local ck = key .. "|" .. cover_state
-                        local def = DEFAULT_COVER_OFFSETS[ck]
-                        if def then
-                            ui_offset.x = def.x
-                            ui_offset.y = def.y
-                            ui_offset.z = def.z
-                            cover_offsets[ck] = { x = def.x, y = def.y, z = def.z }
-                        else
-                            ui_offset.x = 0.0
-                            ui_offset.y = 0.0
-                            ui_offset.z = 0.0
-                            cover_offsets[ck] = nil
-                        end
-                        save_cover_offsets()
+                        set_cover_offset(key, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
                     else
-                        local def = DEFAULT_OFFSETS[key]
-                        if def then
-                            ui_offset.x = def.x
-                            ui_offset.y = def.y
-                            ui_offset.z = def.z
-                            weapon_offsets[key] = { x = def.x, y = def.y, z = def.z }
-                        else
-                            ui_offset.x = 0.0
-                            ui_offset.y = 0.0
-                            ui_offset.z = 0.0
-                            weapon_offsets[key] = nil
-                        end
+                        weapon_offsets[key] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
                         save_offsets()
                     end
-                    reset_confirm = false
                 end
-                imgui.same_line()
-                if imgui.button("No##reset") then
-                    reset_confirm = false
-                end
-            end
-            imgui.same_line()
-            if not copy_all_confirm then
-                if imgui.button("Copy to All") then
-                    copy_all_confirm = true
-                end
-            else
-                imgui.text_colored("Apply to all weapons?", 0xFF00FFFF)
-                if imgui.button("Yes") then
-                    for _, wk in ipairs(WEAPON_KEYS) do
-                        if cover_state == "StandardFPS" then
-                            set_standard_fps_offset(wk, ui_offset.x, ui_offset.y, ui_offset.z)
-                        elseif cover_state then
-                            set_cover_offset(wk, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
-                        else
-                            weapon_offsets[wk] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
-                        end
+
+                if not reset_confirm then
+                    if imgui.button("Reset##offset") then
+                        reset_confirm = true
                     end
-                    if cover_state == "StandardFPS" then save_standard_fps_offsets() end
-                    if not cover_state then save_offsets() end
-                    copy_all_confirm = false
+                else
+                    imgui.text_colored("Reset this weapon?", 0xFF00FFFF)
+                    if imgui.button("Yes##reset") then
+                        if cover_state == "StandardFPS" then
+                            local def = default_standard_fps_offsets[key] or default_standard_fps_offset
+                            ui_offset.x = def.x
+                            ui_offset.y = def.y
+                            ui_offset.z = def.z
+                            standard_fps_offsets[key] = { x = def.x, y = def.y, z = def.z }
+                            save_standard_fps_offsets()
+                        elseif cover_state then
+                            local ck = key .. "|" .. cover_state
+                            local def = DEFAULT_COVER_OFFSETS[ck]
+                            if def then
+                                ui_offset.x = def.x
+                                ui_offset.y = def.y
+                                ui_offset.z = def.z
+                                cover_offsets[ck] = { x = def.x, y = def.y, z = def.z }
+                            else
+                                ui_offset.x = 0.0
+                                ui_offset.y = 0.0
+                                ui_offset.z = 0.0
+                                cover_offsets[ck] = nil
+                            end
+                            save_cover_offsets()
+                        else
+                            local def = DEFAULT_OFFSETS[key]
+                            if def then
+                                ui_offset.x = def.x
+                                ui_offset.y = def.y
+                                ui_offset.z = def.z
+                                weapon_offsets[key] = { x = def.x, y = def.y, z = def.z }
+                            else
+                                ui_offset.x = 0.0
+                                ui_offset.y = 0.0
+                                ui_offset.z = 0.0
+                                weapon_offsets[key] = nil
+                            end
+                            save_offsets()
+                        end
+                        reset_confirm = false
+                    end
+                    imgui.same_line()
+                    if imgui.button("No##reset") then
+                        reset_confirm = false
+                    end
                 end
                 imgui.same_line()
-                if imgui.button("No") then
-                    copy_all_confirm = false
+                if not copy_all_confirm then
+                    if imgui.button("Copy to All") then
+                        copy_all_confirm = true
+                    end
+                else
+                    imgui.text_colored("Apply to all weapons?", 0xFF00FFFF)
+                    if imgui.button("Yes") then
+                        for _, wk in ipairs(WEAPON_KEYS) do
+                            if cover_state == "StandardFPS" then
+                                set_standard_fps_offset(wk, ui_offset.x, ui_offset.y, ui_offset.z)
+                            elseif cover_state then
+                                set_cover_offset(wk, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
+                            else
+                                weapon_offsets[wk] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
+                            end
+                        end
+                        if cover_state == "StandardFPS" then save_standard_fps_offsets() end
+                        if not cover_state then save_offsets() end
+                        copy_all_confirm = false
+                    end
+                    imgui.same_line()
+                    if imgui.button("No") then
+                        copy_all_confirm = false
+                    end
                 end
+                imgui.tree_pop()
+            end
+
+            if imgui.tree_node("Standard FPS Offsets") then
+                local sfps_o = get_standard_fps_offset(key) or default_standard_fps_offsets[key] or default_standard_fps_offset
+                local sfps_x, sfps_y, sfps_z = sfps_o.x or 0, sfps_o.y or 0, sfps_o.z or 0
+                local sx, sx_new = imgui.drag_float("Left/Right (Standard FPS)", sfps_x, 0.001, -5.0, 5.0, "%.4f")
+                if sx then sfps_x = sx_new end
+                local sy, sy_new = imgui.drag_float("Up/Down (Standard FPS)", sfps_y, 0.001, -5.0, 5.0, "%.4f")
+                if sy then sfps_y = sy_new end
+                local sz, sz_new = imgui.drag_float("Back/Forward (Standard FPS)", sfps_z, 0.001, -5.0, 5.0, "%.4f")
+                if sz then sfps_z = sz_new end
+                if sx or sy or sz then
+                    set_standard_fps_offset(key, sfps_x, sfps_y, sfps_z)
+                end
+                imgui.text("Weapon: " .. (WEAPON_NAMES[key] or key))
+                imgui.text("Uses the weapon selected in the Weapon dropdown above.")
+                imgui.tree_pop()
+            end
+
+            if imgui.tree_node("Canted Aim") then
+                local arm_rot_changed
+                arm_rot_changed, arm_rotation_enabled = imgui.checkbox("Arm rotation adjustment", arm_rotation_enabled)
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("Apply arm/hand and arm lower rotation offsets. Toggle with hotkey: rapid double-click (see Hotkeys section).")
+                end
+                if arm_rot_changed then
+                    prefs.arm_rotation_enabled = arm_rotation_enabled
+                    save_prefs()
+                end
+                local artin_changed
+                artin_changed, ARM_ROT_TRANSITION_IN = imgui.drag_float("Arm rot. transition in (sec)", ARM_ROT_TRANSITION_IN, 0.01, 0.0, 5.0, "%.2f")
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("How fast arm rotation blends in when enabled")
+                end
+                if artin_changed then prefs.arm_rot_transition_in = ARM_ROT_TRANSITION_IN; save_prefs() end
+                local artout_changed
+                artout_changed, ARM_ROT_TRANSITION_OUT = imgui.drag_float("Arm rot. transition out (sec)", ARM_ROT_TRANSITION_OUT, 0.01, 0.0, 5.0, "%.2f")
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("How fast arm rotation blends out when disabled")
+                end
+                if artout_changed then prefs.arm_rot_transition_out = ARM_ROT_TRANSITION_OUT; save_prefs() end
+                local wobble_changed
+                wobble_changed, prefs.arm_rot_wobble = imgui.checkbox("Arm rot. wobble (overshoot effect)", prefs.arm_rot_wobble)
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("Adds a realistic overshoot/oscillation after the transition ends. Disable for a clean, smooth blend.")
+                end
+                if wobble_changed then save_prefs() end
+                if prefs.arm_rot_wobble then
+                local ark_changed
+                ark_changed, ARM_ROT_SPRING_K = imgui.drag_float("Arm rot. spring stiffness (K)", ARM_ROT_SPRING_K, 1.0, 10.0, 5000.0, "%.0f")
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("Higher = snappier wobble after transition")
+                end
+                if ark_changed then prefs.arm_rot_spring_k = ARM_ROT_SPRING_K; save_prefs() end
+                local ard_changed
+                ard_changed, ARM_ROT_SPRING_D = imgui.drag_float("Arm rot. spring damping (D)", ARM_ROT_SPRING_D, 0.1, 1.0, 100.0, "%.1f")
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("Lower = more oscillation; higher = settles faster")
+                end
+                if ard_changed then prefs.arm_rot_spring_d = ARM_ROT_SPRING_D; save_prefs() end
+                end -- wobble sliders
+                -- Arm hand rotation (R_Arm_Hand / L_Arm_Hand) — per weapon
+                if imgui.tree_node("Arm hand rotation") then
+                    resolve_arm_hand_joints()
+                    imgui.text("L_Arm_Hand mirrors R_Arm_Hand. Weapon: " .. (WEAPON_NAMES[key] or key))
+                    local h = get_arm_hand_rotation(key)
+                    local ax, ax_new = imgui.drag_float("X (deg)", h.x, 0.5, -180.0, 180.0, "%.1f")
+                    if ax then h.x = ax_new end
+                    local ay, ay_new = imgui.drag_float("Y (deg)", h.y, 0.5, -180.0, 180.0, "%.1f")
+                    if ay then h.y = ay_new end
+                    local az, az_new = imgui.drag_float("Z (deg)", h.z, 0.5, -180.0, 180.0, "%.1f")
+                    if az then h.z = az_new end
+                    if ax or ay or az then set_arm_hand_rotation(key, h.x, h.y, h.z); save_arm_hand_rotation() end
+                    if imgui.button("Reset##arm_hand") then
+                        set_arm_hand_rotation(key, 0.0, 0.0, 0.0)
+                        save_arm_hand_rotation()
+                    end
+                    if not joint_r_arm_hand and not joint_l_arm_hand then
+                        imgui.text_colored("Arm hand joints not found", 0xFF00FF00)
+                    end
+                    imgui.tree_pop()
+                end
+                -- Arm lower rotation (R_Arm_Lower / L_Arm_Lower) — per weapon
+                if imgui.tree_node("Arm lower rotation") then
+                    resolve_arm_hand_joints()
+                    imgui.text("L_Arm_Lower mirrors R_Arm_Lower. Weapon: " .. (WEAPON_NAMES[key] or key))
+                    local l = get_arm_lower_rotation(key)
+                    local lx, lx_new = imgui.drag_float("X (deg)##arm_lower", l.x, 0.5, -180.0, 180.0, "%.1f")
+                    if lx then l.x = lx_new end
+                    local ly, ly_new = imgui.drag_float("Y (deg)##arm_lower", l.y, 0.5, -180.0, 180.0, "%.1f")
+                    if ly then l.y = ly_new end
+                    local lz, lz_new = imgui.drag_float("Z (deg)##arm_lower", l.z, 0.5, -180.0, 180.0, "%.1f")
+                    if lz then l.z = lz_new end
+                    if lx or ly or lz then set_arm_lower_rotation(key, l.x, l.y, l.z); save_arm_hand_rotation() end
+                    if imgui.button("Reset##arm_lower") then
+                        set_arm_lower_rotation(key, 0.0, 0.0, 0.0)
+                        save_arm_hand_rotation()
+                    end
+                    if not joint_r_arm_lower and not joint_l_arm_lower then
+                        imgui.text_colored("Arm lower joints not found", 0xFF00FF00)
+                    end
+                    imgui.tree_pop()
+                end
+                -- Arm upper rotation (R_Arm_Upper / L_Arm_Upper) — per weapon
+                if imgui.tree_node("Arm upper rotation") then
+                    resolve_arm_hand_joints()
+                    imgui.text("L_Arm_Upper mirrors R_Arm_Upper. Weapon: " .. (WEAPON_NAMES[key] or key))
+                    local u = get_arm_upper_rotation(key)
+                    local ux, ux_new = imgui.drag_float("X (deg)##arm_upper", u.x, 0.5, -180.0, 180.0, "%.1f")
+                    if ux then u.x = ux_new end
+                    local uy, uy_new = imgui.drag_float("Y (deg)##arm_upper", u.y, 0.5, -180.0, 180.0, "%.1f")
+                    if uy then u.y = uy_new end
+                    local uz, uz_new = imgui.drag_float("Z (deg)##arm_upper", u.z, 0.5, -180.0, 180.0, "%.1f")
+                    if uz then u.z = uz_new end
+                    if ux or uy or uz then set_arm_upper_rotation(key, u.x, u.y, u.z); save_arm_hand_rotation() end
+                    if imgui.button("Reset##arm_upper") then
+                        set_arm_upper_rotation(key, 0.0, 0.0, 0.0)
+                        save_arm_hand_rotation()
+                    end
+                    if not joint_r_arm_upper and not joint_l_arm_upper then
+                        imgui.text_colored("Arm upper joints not found", 0xFF00FF00)
+                    end
+                    imgui.tree_pop()
+                end
+                imgui.tree_pop()
             end
         end
 
@@ -2273,14 +2412,6 @@ re.on_draw_ui(function()
             end
             if breath_changed then
                 prefs.ha_breath_duration = breath_new
-                save_prefs()
-            end
-            local mfr_changed, mfr_new = imgui.checkbox("Apply min fit rate when holding breath", prefs.ha_apply_min_fit_rate)
-            if imgui.is_item_hovered() then
-                imgui.set_tooltip("When checked, holding breath applies min fit rate (camera shake) and point range (reticle fit). Uncheck to leave both unchanged during hold breath.")
-            end
-            if mfr_changed then
-                prefs.ha_apply_min_fit_rate = mfr_new
                 save_prefs()
             end
         end
@@ -2482,7 +2613,7 @@ re.on_draw_ui(function()
         imgui.unindent(10)
         imgui.separator()
 
-        imgui.text_colored(" Arm rotation adjustment Toggle (rapid double-click):", 0xFFFFFFAA)
+        imgui.text_colored(" Canted Aim Toggle (rapid double-click):", 0xFFFFFFAA)
         imgui.indent(10)
         imgui.text("Keyboard and Mouse:")
         imgui.indent(10)
