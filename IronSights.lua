@@ -1457,6 +1457,11 @@ end
 _ha.hotkey_activated = false
 _ha.toggle_cooldown = 0.35
 _ha.last_toggle_time = 0
+_ha.last_shot_time = 0
+_ha.pending_disengage = false
+_ha.disengage_after = 0
+_ha.pending_disengage_wkey = nil
+local HA_DISENGAGE_DELAY_AFTER_SHOT = 0.5
 
 re.on_application_entry("UpdateBehavior", function()
     local ha_kb = (not is_hk_settings.use_ha_modifier or hk.check_hotkey("HA Modifier", true)) and hk.check_hotkey("Hold Animation Toggle", true)
@@ -1466,20 +1471,10 @@ re.on_application_entry("UpdateBehavior", function()
     local now = os.clock()
 
     if prefs.ha_hold_to_activate then
-        if ha_down and wkey then
-            if not _ha.hotkey_activated and (now - _ha.last_toggle_time) >= _ha.toggle_cooldown then
-                if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = { force = 1.0, speed = 0.1, ramp = 1.5 } end
-                hold_anim_edits[wkey].enabled = true
-                _ha.blend_weight = 0.0
-                _ha.active_start = nil
-                refresh_any_hold_anim()
-                save_hold_anim()
-                _ha.hotkey_activated = true
-                _ha.last_toggle_time = now
-            end
-        elseif _ha.hotkey_activated and wkey then
-            if hold_anim_edits[wkey] then
-                hold_anim_edits[wkey].enabled = false
+        if _ha.pending_disengage and now >= _ha.disengage_after and _ha.pending_disengage_wkey then
+            local pk = _ha.pending_disengage_wkey
+            if hold_anim_edits[pk] then
+                hold_anim_edits[pk].enabled = false
                 local all_ml = get_ha_layers_cached()
                 for i = 1, #all_ml do
                     _ha.set_layer(all_ml[i].layer, 1.0, 1.0)
@@ -1496,7 +1491,28 @@ re.on_application_entry("UpdateBehavior", function()
                 _ha.breath_pf_applied = false
             end
             _ha.hotkey_activated = false
+            _ha.pending_disengage = false
+            _ha.pending_disengage_wkey = nil
             _ha.last_toggle_time = now
+        elseif ha_down and wkey then
+            if _ha.pending_disengage then
+                _ha.pending_disengage = false
+                _ha.pending_disengage_wkey = nil
+            end
+            if not _ha.hotkey_activated and (now - _ha.last_toggle_time) >= _ha.toggle_cooldown then
+                if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = { force = 1.0, speed = 0.1, ramp = 1.5 } end
+                hold_anim_edits[wkey].enabled = true
+                _ha.blend_weight = 0.0
+                _ha.active_start = nil
+                refresh_any_hold_anim()
+                save_hold_anim()
+                _ha.hotkey_activated = true
+                _ha.last_toggle_time = now
+            end
+        elseif _ha.hotkey_activated and wkey then
+            _ha.pending_disengage = true
+            _ha.disengage_after = math.max(now, _ha.last_shot_time + HA_DISENGAGE_DELAY_AFTER_SHOT)
+            _ha.pending_disengage_wkey = wkey
         end
     else
         if ha_down and not ha_toggle_was_down and wkey and (now - _ha.last_toggle_time) >= _ha.toggle_cooldown then
@@ -1587,6 +1603,7 @@ re.on_application_entry("UpdateBehavior", function()
 
     -- Don't start or increase hold-breath blend until recoil animation is complete
     local recoil_playing = want_active and is_recoil_animation_playing()
+    if recoil_playing then _ha.last_shot_time = now end
     local allow_blend_in = want_active and not recoil_playing
     if allow_blend_in then
         _ha.blend_weight = math.min(1.0, _ha.blend_weight + dt * ramp)
