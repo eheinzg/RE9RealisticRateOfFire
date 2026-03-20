@@ -196,6 +196,28 @@ local function set_standard_fps_offset(weapon_key, x, y, z)
 end
 
 -- Arm hand/lower/upper rotation per weapon (Euler degrees X,Y,Z for right hand; left mirrors)
+-- Hardcoded defaults from arm_hand_rotation.json (used when no saved file or missing keys)
+local DEFAULT_CANTED_OFFSETS = {
+    arm0000       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -12.0, y = 12.5,  z = -2.0 }, arm_upper_rotation = { x = 10.5, y = -6.0,  z = 4.5 } },
+    arm0001       = { arm_hand_rotation = { x = 24.0,  y = 4.0,   z = -8.5 },  arm_lower_rotation = { x = 13.0,  y = -4.5,  z = 0.0 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0003       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -12.0, y = 12.5,  z = -2.0 }, arm_upper_rotation = { x = 10.5, y = -6.0,  z = 4.5 } },
+    arm0004       = { arm_hand_rotation = { x = 24.0,  y = 4.0,   z = -8.5 },  arm_lower_rotation = { x = 13.0,  y = -4.5,  z = 0.0 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0005       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -9.5,  y = 13.5,  z = -2.0 }, arm_upper_rotation = { x = 10.5, y = -6.0,  z = 4.5 } },
+    arm0006       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -12.0, y = 12.5,  z = -2.0 }, arm_upper_rotation = { x = 10.5, y = -6.0,  z = 4.5 } },
+    arm0007       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -12.0, y = 12.5,  z = -2.0 }, arm_upper_rotation = { x = 10.5, y = -6.0,  z = 4.5 } },
+    arm0100       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -6.5,  y = 12.5,  z = -5.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = 0.0 } },
+    arm0103       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -6.5,  y = 12.5,  z = -5.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = 0.0 } },
+    arm0104       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -6.5,  y = 12.5,  z = -5.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = 0.0 } },
+    arm0400_leon  = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0400_grace = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0500       = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0501       = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0503       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -7.5,  y = 6.0,   z = 1.0 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0505       = { arm_hand_rotation = { x = 23.5,  y = 6.5,   z = -7.0 },  arm_lower_rotation = { x = 16.0,  y = -5.5,  z = -1.5 }, arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0600       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -5.5,  y = 14.5,  z = -0.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = -11.5 } },
+    arm0601       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -5.5,  y = 14.5,  z = -0.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = -11.5 } },
+    arm0700       = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+}
 local arm_hand_rotations = {}
 local arm_lower_rotations = {}
 local arm_upper_rotations = {}
@@ -243,6 +265,18 @@ local function save_arm_hand_rotation()
 end
 
 local function load_arm_hand_rotation()
+    -- Apply hardcoded defaults first
+    for wkey, def in pairs(DEFAULT_CANTED_OFFSETS) do
+        if def.arm_hand_rotation then
+            arm_hand_rotations[wkey] = { x = def.arm_hand_rotation.x or 0, y = def.arm_hand_rotation.y or 0, z = def.arm_hand_rotation.z or 0 }
+        end
+        if def.arm_lower_rotation then
+            arm_lower_rotations[wkey] = { x = def.arm_lower_rotation.x or 0, y = def.arm_lower_rotation.y or 0, z = def.arm_lower_rotation.z or 0 }
+        end
+        if def.arm_upper_rotation then
+            arm_upper_rotations[wkey] = { x = def.arm_upper_rotation.x or 0, y = def.arm_upper_rotation.y or 0, z = def.arm_upper_rotation.z or 0 }
+        end
+    end
     local saved = json.load_file(ARM_HAND_SETTINGS_PATH)
     if not saved or type(saved) ~= "table" then return end
     -- Legacy: top-level arm_hand_rotation / arm_lower_rotation / arm_upper_rotation (no per-weapon key like "arm0000")
@@ -263,6 +297,7 @@ local function load_arm_hand_rotation()
         save_arm_hand_rotation()
         return
     end
+    -- Overlay saved per-weapon entries on top of defaults
     for wkey, entry in pairs(saved) do
         if type(entry) == "table" and type(wkey) == "string" then
             if entry.arm_hand_rotation and type(entry.arm_hand_rotation) == "table" then
@@ -374,7 +409,7 @@ local function arm_upper_offset_quat_l(rot)
     return euler_deg_to_quat(-rot.x, rot.y, -rot.z)
 end
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = true, ha_breath_duration = 3.5, ha_apply_min_fit_rate = true, zero_min_fit_rate = false, perfect_focus = true, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true, auto_iron_sight = true, arm_rotation_enabled = true, arm_rot_transition_in = 0.15, arm_rot_transition_out = 0.2, arm_rot_spring_k = 1000.0, arm_rot_spring_d = 20.0, arm_rot_wobble = true }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = true, ha_breath_duration = 3.5, ha_apply_min_fit_rate = true, zero_min_fit_rate = false, perfect_focus = true, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true, auto_iron_sight = true, arm_rotation_enabled = true, arm_rot_transition_in = 0.15, arm_rot_transition_out = 0.2, arm_rot_spring_k = 1000.0, arm_rot_spring_d = 20.0, arm_rot_wobble = true, arm_rot_wobble_in = true }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
@@ -399,6 +434,7 @@ do
         if saved.arm_rot_spring_k ~= nil then prefs.arm_rot_spring_k = saved.arm_rot_spring_k end
         if saved.arm_rot_spring_d ~= nil then prefs.arm_rot_spring_d = saved.arm_rot_spring_d end
         if saved.arm_rot_wobble ~= nil then prefs.arm_rot_wobble = saved.arm_rot_wobble end
+        if saved.arm_rot_wobble_in ~= nil then prefs.arm_rot_wobble_in = saved.arm_rot_wobble_in end
     end
 end
 local function save_prefs()
@@ -1678,10 +1714,11 @@ re.on_application_entry("UpdateBehavior", function()
         end
     end
 
-    -- Don't start or increase hold-breath blend until recoil animation is complete
+    -- Don't start or increase hold-breath blend until recoil animation is complete (skip for shotguns so they match ShotgunWorking behavior)
     local recoil_playing = want_active and is_recoil_animation_playing()
     if recoil_playing then _ha.last_shot_time = now end
-    local allow_blend_in = want_active and not recoil_playing
+    local is_shotgun = (cached_weapon_id == "arm0100" or cached_weapon_id == "arm0103" or cached_weapon_id == "arm0104")
+    local allow_blend_in = want_active and (is_shotgun or not recoil_playing)
     if allow_blend_in then
         _ha.blend_weight = math.min(1.0, _ha.blend_weight + dt * ramp)
     else
@@ -1852,7 +1889,8 @@ re.on_application_entry("LateUpdateBehavior", function()
     if dt_hold < 0 then dt_hold = 0 end
     if dt_hold > 0.05 then dt_hold = 0.05 end
     ah_hold_apply_last_time = now
-    if cached_is_hold_end_request then
+    -- Only increase blend when actually holding; if game leaves IsHoldEndRequest true after release, decay so effect can't get stuck
+    if cached_is_hold_end_request and cached_is_holding then
         ah_hold_apply_blend = math.min(1.0, ah_hold_apply_blend + dt_hold * AH_HOLD_APPLY_RATE)
     else
         ah_hold_apply_blend = math.max(0.0, ah_hold_apply_blend - dt_hold * AH_HOLD_APPLY_RATE)
@@ -1888,7 +1926,8 @@ re.on_application_entry("LateUpdateBehavior", function()
         local elapsed = now - arm_rot_transition_start_time
         if elapsed >= duration then
             arm_rot_in_transition = false
-            if prefs.arm_rot_wobble then
+            local wobble_in = prefs.arm_rot_wobble and ((target <= 0.5) or prefs.arm_rot_wobble_in)
+            if wobble_in then
                 arm_rot_blend = (target > 0.5) and 0.9 or 0.1
                 arm_rot_velocity = (target > 0.5) and ARM_ROT_WOBBLE_VEL_IN or -ARM_ROT_WOBBLE_VEL_OUT
             else
@@ -2288,6 +2327,12 @@ re.on_draw_ui(function()
                 end
                 if wobble_changed then save_prefs() end
                 if prefs.arm_rot_wobble then
+                local wobble_in_changed
+                wobble_in_changed, prefs.arm_rot_wobble_in = imgui.checkbox("Wobble when going into canted", prefs.arm_rot_wobble_in)
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("Uncheck to disable the overshoot effect only when entering canted; wobble when leaving canted is unchanged.")
+                end
+                if wobble_in_changed then save_prefs() end
                 local ark_changed
                 ark_changed, ARM_ROT_SPRING_K = imgui.drag_float("Arm rot. spring stiffness (K)", ARM_ROT_SPRING_K, 1.0, 10.0, 5000.0, "%.0f")
                 if imgui.is_item_hovered() then
