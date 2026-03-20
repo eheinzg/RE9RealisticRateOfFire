@@ -216,7 +216,7 @@ local DEFAULT_CANTED_OFFSETS = {
     arm0505       = { arm_hand_rotation = { x = 23.5,  y = 6.5,   z = -7.0 },  arm_lower_rotation = { x = 16.0,  y = -5.5,  z = -1.5 }, arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
     arm0600       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -5.5,  y = 14.5,  z = -0.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = -11.5 } },
     arm0601       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -5.5,  y = 14.5,  z = -0.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = -11.5 } },
-    arm0700       = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0700       = { arm_hand_rotation = { x = 0.0,  y = 0.0,  z = 0.0 }, arm_lower_rotation = { x = 0.0,  y = 0.0,  z = 0.0 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
 }
 local arm_hand_rotations = {}
 local arm_lower_rotations = {}
@@ -1926,6 +1926,7 @@ re.on_application_entry("LateUpdateBehavior", function()
         local elapsed = now - arm_rot_transition_start_time
         if elapsed >= duration then
             arm_rot_in_transition = false
+            --[[ arm wobble (0 cost when commented out)
             local wobble_in = prefs.arm_rot_wobble and ((target <= 0.5) or prefs.arm_rot_wobble_in)
             if wobble_in then
                 arm_rot_blend = (target > 0.5) and 0.9 or 0.1
@@ -1934,11 +1935,15 @@ re.on_application_entry("LateUpdateBehavior", function()
                 arm_rot_blend = target
                 arm_rot_velocity = 0.0
             end
+            --]]
+            arm_rot_blend = target
+            arm_rot_velocity = 0.0
         else
             arm_rot_blend = arm_rot_transition_start_blend + (target - arm_rot_transition_start_blend) * smoothstep(elapsed / duration)
             arm_rot_velocity = 0.0
         end
     else
+        --[[ arm wobble spring physics (0 cost when commented out)
         local speed_scale = (target > 0.5) and (0.2 / math.max(0.05, ARM_ROT_TRANSITION_IN)) or (0.2 / math.max(0.05, ARM_ROT_TRANSITION_OUT))
         if speed_scale < 0.3 then speed_scale = 0.3 elseif speed_scale > 3.0 then speed_scale = 3.0 end
         local k = ARM_ROT_SPRING_K * speed_scale
@@ -1957,6 +1962,9 @@ re.on_application_entry("LateUpdateBehavior", function()
             arm_rot_blend = target
             arm_rot_velocity = 0.0
         end
+        --]]
+        arm_rot_blend = target
+        arm_rot_velocity = 0.0
     end
 
     apply_arm_hand_rotation()
@@ -2320,6 +2328,7 @@ re.on_draw_ui(function()
                 end
                 if artout_changed then prefs.arm_rot_transition_out = ARM_ROT_TRANSITION_OUT; save_prefs() end
                 --]]
+                --[[ arm wobble UI (hidden while wobble code is commented out)
                 local wobble_changed
                 wobble_changed, prefs.arm_rot_wobble = imgui.checkbox("Arm rot. wobble (overshoot effect)", prefs.arm_rot_wobble)
                 if imgui.is_item_hovered() then
@@ -2346,6 +2355,7 @@ re.on_draw_ui(function()
                 end
                 if ard_changed then prefs.arm_rot_spring_d = ARM_ROT_SPRING_D; save_prefs() end
                 end -- wobble sliders
+                --]]
                 -- Arm hand rotation (R_Arm_Hand / L_Arm_Hand) — per weapon
                 if imgui.tree_node("Hands") then
                     resolve_arm_hand_joints()
@@ -2358,7 +2368,12 @@ re.on_draw_ui(function()
                     if az then h.z = az_new end
                     if ax or ay or az then set_arm_hand_rotation(key, h.x, h.y, h.z); save_arm_hand_rotation() end
                     if imgui.button("Reset##arm_hand") then
-                        set_arm_hand_rotation(key, 0.0, 0.0, 0.0)
+                        local def = key and DEFAULT_CANTED_OFFSETS[key] and DEFAULT_CANTED_OFFSETS[key].arm_hand_rotation
+                        if def then
+                            set_arm_hand_rotation(key, def.x or 0, def.y or 0, def.z or 0)
+                        else
+                            set_arm_hand_rotation(key, 0.0, 0.0, 0.0)
+                        end
                         save_arm_hand_rotation()
                     end
                     if not joint_r_arm_hand and not joint_l_arm_hand then
@@ -2378,7 +2393,12 @@ re.on_draw_ui(function()
                     if lz then l.z = lz_new end
                     if lx or ly or lz then set_arm_lower_rotation(key, l.x, l.y, l.z); save_arm_hand_rotation() end
                     if imgui.button("Reset##arm_lower") then
-                        set_arm_lower_rotation(key, 0.0, 0.0, 0.0)
+                        local def = key and DEFAULT_CANTED_OFFSETS[key] and DEFAULT_CANTED_OFFSETS[key].arm_lower_rotation
+                        if def then
+                            set_arm_lower_rotation(key, def.x or 0, def.y or 0, def.z or 0)
+                        else
+                            set_arm_lower_rotation(key, 0.0, 0.0, 0.0)
+                        end
                         save_arm_hand_rotation()
                     end
                     if not joint_r_arm_lower and not joint_l_arm_lower then
@@ -2398,7 +2418,12 @@ re.on_draw_ui(function()
                     if uz then u.z = uz_new end
                     if ux or uy or uz then set_arm_upper_rotation(key, u.x, u.y, u.z); save_arm_hand_rotation() end
                     if imgui.button("Reset##arm_upper") then
-                        set_arm_upper_rotation(key, 0.0, 0.0, 0.0)
+                        local def = key and DEFAULT_CANTED_OFFSETS[key] and DEFAULT_CANTED_OFFSETS[key].arm_upper_rotation
+                        if def then
+                            set_arm_upper_rotation(key, def.x or 0, def.y or 0, def.z or 0)
+                        else
+                            set_arm_upper_rotation(key, 0.0, 0.0, 0.0)
+                        end
                         save_arm_hand_rotation()
                     end
                     if not joint_r_arm_upper and not joint_l_arm_upper then
