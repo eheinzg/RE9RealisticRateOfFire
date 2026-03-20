@@ -2424,75 +2424,6 @@ re.on_draw_ui(function()
                     imgui.set_tooltip("Gamepad canted hotkey: if unchecked, one press toggles; if checked, two quick presses toggle.")
                 end
                 if ar_dbl_kb_t or ar_dbl_pad_t then save_prefs() end
-                --[[ commented out for now
-                local arm_rot_changed
-                arm_rot_changed, arm_rotation_enabled = imgui.checkbox("Arm rotation adjustment", arm_rotation_enabled)
-                if imgui.is_item_hovered() then
-                    imgui.set_tooltip("Apply arm/hand and arm lower rotation offsets. Toggle with hotkey: rapid double-click (see Hotkeys section).")
-                end
-                if arm_rot_changed then
-                    prefs.arm_rotation_enabled = arm_rotation_enabled
-                    save_prefs()
-                end
-                local artin_changed
-                artin_changed, ARM_ROT_TRANSITION_IN = imgui.drag_float("Arm rot. transition in (sec)", ARM_ROT_TRANSITION_IN, 0.01, 0.0, 5.0, "%.2f")
-                if imgui.is_item_hovered() then
-                    imgui.set_tooltip("How fast arm rotation blends in when enabled")
-                end
-                if artin_changed then prefs.arm_rot_transition_in = ARM_ROT_TRANSITION_IN; save_prefs() end
-                local artout_changed
-                artout_changed, ARM_ROT_TRANSITION_OUT = imgui.drag_float("Arm rot. transition out (sec)", ARM_ROT_TRANSITION_OUT, 0.01, 0.0, 5.0, "%.2f")
-                if imgui.is_item_hovered() then
-                    imgui.set_tooltip("How fast arm rotation blends out when disabled")
-                end
-                if artout_changed then prefs.arm_rot_transition_out = ARM_ROT_TRANSITION_OUT; save_prefs() end
-                --]]
-                -- Wobble (overshoot) sliders
-                imgui.text("Wobble (overshoot)")
-                local wob_amp_ch
-                wob_amp_ch, prefs.arm_rot_wobble_amplitude = imgui.slider_float("Amplitude##wobble", prefs.arm_rot_wobble_amplitude, 0.0, 0.25, "%.2f")
-                if imgui.is_item_hovered() then imgui.set_tooltip("How much the blend overshoots (0 = no wobble). Default 0.04") end
-                if wob_amp_ch then save_prefs() end
-                local wob_freq_ch
-                wob_freq_ch, prefs.arm_rot_wobble_frequency = imgui.slider_float("Frequency##wobble", prefs.arm_rot_wobble_frequency, 1.0, 40.0, "%.1f")
-                if imgui.is_item_hovered() then imgui.set_tooltip("Speed of oscillation (higher = faster). Default 21.0") end
-                if wob_freq_ch then save_prefs() end
-                local wob_damp_ch
-                wob_damp_ch, prefs.arm_rot_wobble_damping = imgui.slider_float("Damping##wobble", prefs.arm_rot_wobble_damping, 0.5, 10.0, "%.1f")
-                if imgui.is_item_hovered() then imgui.set_tooltip("How quickly wobble fades (higher = settles faster). Default 6.3") end
-                if wob_damp_ch then save_prefs() end
-                local wob_dur_ch
-                wob_dur_ch, prefs.arm_rot_wobble_duration = imgui.slider_float("Duration (sec)##wobble", prefs.arm_rot_wobble_duration, 0.2, 4.0, "%.2f")
-                if imgui.is_item_hovered() then imgui.set_tooltip("How long the wobble runs before settling. Default 1.6") end
-                if wob_dur_ch then save_prefs() end
-                --[[ arm wobble UI (hidden while wobble code is commented out)
-                local wobble_changed
-                wobble_changed, prefs.arm_rot_wobble = imgui.checkbox("Arm rot. wobble (overshoot effect)", prefs.arm_rot_wobble)
-                if imgui.is_item_hovered() then
-                    imgui.set_tooltip("Adds a realistic overshoot/oscillation after the transition ends. Disable for a clean, smooth blend.")
-                end
-                if wobble_changed then save_prefs() end
-                if prefs.arm_rot_wobble then
-                local wobble_in_changed
-                wobble_in_changed, prefs.arm_rot_wobble_in = imgui.checkbox("Wobble when going into canted", prefs.arm_rot_wobble_in)
-                if imgui.is_item_hovered() then
-                    imgui.set_tooltip("Uncheck to disable the overshoot effect only when entering canted; wobble when leaving canted is unchanged.")
-                end
-                if wobble_in_changed then save_prefs() end
-                local ark_changed
-                ark_changed, ARM_ROT_SPRING_K = imgui.drag_float("Arm rot. spring stiffness (K)", ARM_ROT_SPRING_K, 1.0, 10.0, 5000.0, "%.0f")
-                if imgui.is_item_hovered() then
-                    imgui.set_tooltip("Higher = snappier wobble after transition")
-                end
-                if ark_changed then prefs.arm_rot_spring_k = ARM_ROT_SPRING_K; save_prefs() end
-                local ard_changed
-                ard_changed, ARM_ROT_SPRING_D = imgui.drag_float("Arm rot. spring damping (D)", ARM_ROT_SPRING_D, 0.1, 1.0, 100.0, "%.1f")
-                if imgui.is_item_hovered() then
-                    imgui.set_tooltip("Lower = more oscillation; higher = settles faster")
-                end
-                if ard_changed then prefs.arm_rot_spring_d = ARM_ROT_SPRING_D; save_prefs() end
-                end -- wobble sliders
-                --]]
                 -- Arm hand rotation (R_Arm_Hand / L_Arm_Hand) — per weapon
                 if imgui.tree_node("Hands") then
                     resolve_arm_hand_joints()
@@ -2565,6 +2496,33 @@ re.on_draw_ui(function()
                     end
                     if not joints.r_arm_upper and not joints.l_arm_upper then
                         imgui.text_colored("Arm upper joints not found", 0xFF00FF00)
+                    end
+                    imgui.tree_pop()
+                end
+                -- Wobble (overshoot) settings
+                if imgui.tree_node("Wobble (overshoot)") then
+                    local wob_amp_ch
+                    wob_amp_ch, prefs.arm_rot_wobble_amplitude = imgui.slider_float("Amplitude##wobble", prefs.arm_rot_wobble_amplitude, 0.0, 0.25, "%.2f")
+                    if imgui.is_item_hovered() then imgui.set_tooltip("How much the blend overshoots (0 = no wobble). Default 0.04") end
+                    if wob_amp_ch then save_prefs() end
+                    local wob_freq_ch
+                    wob_freq_ch, prefs.arm_rot_wobble_frequency = imgui.slider_float("Frequency##wobble", prefs.arm_rot_wobble_frequency, 1.0, 40.0, "%.1f")
+                    if imgui.is_item_hovered() then imgui.set_tooltip("Speed of oscillation (higher = faster). Default 21.0") end
+                    if wob_freq_ch then save_prefs() end
+                    local wob_damp_ch
+                    wob_damp_ch, prefs.arm_rot_wobble_damping = imgui.slider_float("Damping##wobble", prefs.arm_rot_wobble_damping, 0.5, 10.0, "%.1f")
+                    if imgui.is_item_hovered() then imgui.set_tooltip("How quickly wobble fades (higher = settles faster). Default 6.3") end
+                    if wob_damp_ch then save_prefs() end
+                    local wob_dur_ch
+                    wob_dur_ch, prefs.arm_rot_wobble_duration = imgui.slider_float("Duration (sec)##wobble", prefs.arm_rot_wobble_duration, 0.2, 4.0, "%.2f")
+                    if imgui.is_item_hovered() then imgui.set_tooltip("How long the wobble runs before settling. Default 1.6") end
+                    if wob_dur_ch then save_prefs() end
+                    if imgui.button("Reset to Defaults##wobble") then
+                        prefs.arm_rot_wobble_amplitude = 0.04
+                        prefs.arm_rot_wobble_frequency = 21.0
+                        prefs.arm_rot_wobble_damping = 6.3
+                        prefs.arm_rot_wobble_duration = 1.6
+                        save_prefs()
                     end
                     imgui.tree_pop()
                 end
