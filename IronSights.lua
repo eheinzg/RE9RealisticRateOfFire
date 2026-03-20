@@ -211,7 +211,7 @@ local DEFAULT_CANTED_OFFSETS = {
     arm0400_leon  = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
     arm0400_grace = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
     arm0500       = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
-    arm0501       = { arm_hand_rotation = { x = 26.0,  y = -8.0,  z = -21.5 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
+    arm0501       = { arm_hand_rotation = { x = 20.0,  y = -5.5,  z = -22.0 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
     arm0503       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -7.5,  y = 6.0,   z = 1.0 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
     arm0505       = { arm_hand_rotation = { x = 23.5,  y = 6.5,   z = -7.0 },  arm_lower_rotation = { x = 16.0,  y = -5.5,  z = -1.5 }, arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
     arm0600       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -5.5,  y = 14.5,  z = -0.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = -11.5 } },
