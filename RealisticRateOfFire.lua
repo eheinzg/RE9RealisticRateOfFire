@@ -7,7 +7,8 @@ local ROF_HOTKEYS_PATH = RROF_DIR .. "hotkeys.json"
 local SETTINGS_PATH = RROF_DIR .. "settings.json"
 local rof_edits = {}
 local rof_defaults = {}
-local has_applied = false 
+local has_applied = false
+local rof_resolve_effective_weapon_key, rof_get_edit_or_fallback
 
 local rof_settings_defaults = {
     disable_regrip = true,
@@ -55,6 +56,7 @@ local OVERLAY_STYLES = { "None", "Circles", "Rectangles", "Text" }
 
 local WEAPON_NAMES = {
     ["arm0000"] = "Matilda IMP",
+    ["arm0000_stock"] = "Matilda IMP (stock)",
     ["arm0001"] = "S&S M232",
     ["arm0003"] = "Silencer 9",
     ["arm0004"] = "B934",
@@ -65,6 +67,8 @@ local WEAPON_NAMES = {
     ["arm0103"] = "W870 Police",
     ["arm0104"] = "990-TAC",
     ["arm0400"] = "Requiem",
+    ["arm0400_leon"] = "Requiem (Leon)",
+    ["arm0400_grace"] = "Requiem (Grace)",
     ["arm0500"] = "Gal",
     ["arm0501"] = "Stiri REVO3 A1",
     ["arm0503"] = "Clatter Carbine",
@@ -75,14 +79,17 @@ local WEAPON_NAMES = {
 }
 
 local WEAPON_KEYS = {
-    "arm0000", "arm0001", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007", 
-    "arm0100", "arm0103", "arm0104", "arm0400", "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601", "arm0700"
+    "arm0000", "arm0000_stock",
+    "arm0001", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007",
+    "arm0100", "arm0103", "arm0104",
+    "arm0400_leon", "arm0400_grace",
+    "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601", "arm0700"
 }
 
 local dropdown_options = {}
 local dropdown_items = {}
 local selected_index = 1
-local last_equipped_id = nil
+local last_equip_context_sig = nil
 
 local ui_state = {
     type_of_shoot = 0,
@@ -104,6 +111,13 @@ for i, key in ipairs(WEAPON_KEYS) do
     local label = WEAPON_NAMES[key] or key
     dropdown_items[i] = key
     dropdown_options[i] = label
+end
+
+--- Variant UI keys -> catalog arm id (must exist before early load_profile()).
+local function rof_catalog_id_for_key(sel_key)
+    if sel_key == "arm0000_stock" then return "arm0000" end
+    if sel_key == "arm0400_leon" or sel_key == "arm0400_grace" then return "arm0400" end
+    return sel_key
 end
 
 local profile_state = {
@@ -196,6 +210,49 @@ local function populate_ui_from_vals(vals, key)
     end
 end
 
+local function deep_copy_weapon_edit(src)
+    if type(src) ~= "table" then return nil end
+    local out = {}
+    for k, v in pairs(src) do
+        if type(v) == "table" then
+            out[k] = deep_copy_weapon_edit(v)
+        else
+            out[k] = v
+        end
+    end
+    return out
+end
+
+--- After "Disable All", rof_edits[key] was replaced with defaults; reload this slot from the selected profile JSON.
+local function restore_weapon_edit_from_active_profile(weapon_key)
+    local pname = profile_state.names[profile_state.selected]
+    if not pname or not weapon_key then return false end
+    local ok, data = pcall(json.load_file, PROFILES_DIR .. pname .. ".json")
+    if not ok or not data or type(data.edits) ~= "table" then return false end
+    local disk = data.edits[weapon_key]
+    if type(disk) ~= "table" then return false end
+    rof_edits[weapon_key] = deep_copy_weapon_edit(disk)
+    rof_edits[weapon_key].disabled = nil
+    populate_ui_from_vals(rof_edits[weapon_key], weapon_key)
+    return true
+end
+
+local function get_weapon_smooth_semi(weapon_key)
+    local edit = weapon_key and rof_edits[weapon_key]
+    if edit and edit.disabled then return false end
+    if not rof_settings.smooth_semi_auto then return false end
+    if edit and edit.smooth_semi ~= nil then return edit.smooth_semi end
+    return rof_settings.smooth_semi_auto
+end
+
+local function get_weapon_smooth_burst(weapon_key)
+    local edit = weapon_key and rof_edits[weapon_key]
+    if edit and edit.disabled then return false end
+    if not rof_settings.smooth_burst then return false end
+    if edit and edit.smooth_burst ~= nil then return edit.smooth_burst end
+    return rof_settings.smooth_burst
+end
+
 local function load_profile(name)
     local ok, data = pcall(json.load_file, PROFILES_DIR .. name .. ".json")
     if ok and data then
@@ -205,7 +262,7 @@ local function load_profile(name)
         end
         local key = dropdown_items[selected_index]
         if key then
-            populate_ui_from_vals(rof_edits[key] or rof_defaults[key], key)
+            populate_ui_from_vals(rof_edits[key] or rof_defaults[key] or rof_defaults[rof_catalog_id_for_key(key)], key)
         end
         return true
     end
@@ -253,16 +310,18 @@ elseif next(rof_edits) == nil then
         end
         local key = dropdown_items[selected_index]
         if key then
-            populate_ui_from_vals(rof_edits[key] or rof_defaults[key], key)
+            populate_ui_from_vals(rof_edits[key] or rof_defaults[key] or rof_defaults[rof_catalog_id_for_key(key)], key)
         end
     end
 end
 
 local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
+local TYPE_PlayerMagazineGun = sdk.typeof("app.PlayerMagazineGun")
 local TYPE_WeaponCatalogRegister = sdk.typeof("app.WeaponCatalogRegister")
 local TYPE_Motion = sdk.typeof("via.motion.Motion")
 local TYPE_BodyAddCtrlDriver = sdk.typeof("app.BodyAddCtrlDriver")
 local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
+
 
 local function try_call(obj, method)
     local r; pcall(function() r = obj:call(method) end); return r
@@ -515,6 +574,10 @@ local function resolve_shoot_data(weapon_data)
     end
 end
 
+local no_camera_shake_ids = {
+    arm0200 = true, arm0202 = true, arm0203 = true, arm0204 = true, arm0207 = true,
+}
+
 local function apply_edits_to_table(dt)
     if not dt then return 0 end
     local applied = 0
@@ -522,17 +585,38 @@ local function apply_edits_to_table(dt)
     for i = 0, count - 1 do
         local wd; pcall(function() wd = dt:call("get_Item", i) end)
         if wd then
-            local wp = try_field(wd, "WeaponParameter") or try_field(wd, "_WeaponParameter")
-            if wp then
-                local acsp = try_field(wp, "_AimCameraShakeParam") or try_field(wp, "AimCameraShakeParam")
-                if acsp then
-                    set_field_safe(acsp, "_EnableAimCameraShake", ui_state.enable_aim_camera_shake)
-                    applied = applied + 1
+            local id = get_entry_id(wd)
+            local skip_shake = id and no_camera_shake_ids[id]
+            -- Use cached_eid only: get_player_equipment is defined later in this file; calling it here resolves as a nil global.
+            local equipped_base = cached_eid
+            local edit = nil
+            if id then
+                -- Requiem shares one catalog id (arm0400) but profile slots are arm0400_leon / arm0400_grace.
+                -- When another weapon is equipped, rof_edits["arm0400"] is usually nil — we must still patch the
+                -- catalog with the current character's row or values go stale / wrong after weapon switches.
+                if id == "arm0400" then
+                    local eff = rof_resolve_effective_weapon_key("arm0400")
+                    edit = rof_get_edit_or_fallback(eff, "arm0400")
+                elseif equipped_base == id and id == "arm0000" then
+                    local eff = rof_resolve_effective_weapon_key(id)
+                    edit = rof_get_edit_or_fallback(eff, id)
+                else
+                    edit = rof_edits[id]
                 end
             end
 
-            local id = get_entry_id(wd)
-            local edit = id and rof_edits[id]
+            if not skip_shake then
+                local wp = try_field(wd, "WeaponParameter") or try_field(wd, "_WeaponParameter")
+                if wp then
+                    local acsp = try_field(wp, "_AimCameraShakeParam") or try_field(wp, "AimCameraShakeParam")
+                    if acsp then
+                        set_field_safe(acsp, "_EnableAimCameraShake", ui_state.enable_aim_camera_shake)
+                        applied = applied + 1
+                    end
+                end
+            end
+
+            -- Apply even when edit.disabled: after "Disable All", reset copies vanilla into edit; skipping here left the catalog modded.
             if edit then
                 local sd = resolve_shoot_data(wd)
                 if sd then
@@ -548,7 +632,7 @@ local function apply_edits_to_table(dt)
                         apply_recoil_values(crp, edit.recoil)
                     end
                 end
-                if edit.shot_camera_shake_move then
+                if not skip_shake and edit.shot_camera_shake_move then
                     apply_shot_camera_shake_move(wd, edit.shot_camera_shake_move)
                 end
             end
@@ -646,7 +730,19 @@ local function apply_edits_to_attachments(dt)
         if not param or not try_field(param, "_ShootData") then goto continue end
         local att_str = resolve_att_id(entry)
         local weapon_id = att_id_to_weapon_id(att_str)
-        local edit = weapon_id and rof_edits[weapon_id]
+        local edit = nil
+        if weapon_id then
+            local equipped_base = cached_eid
+            if weapon_id == "arm0400" then
+                local eff = rof_resolve_effective_weapon_key("arm0400")
+                edit = rof_get_edit_or_fallback(eff, "arm0400")
+            elseif equipped_base == weapon_id and weapon_id == "arm0000" then
+                local eff = rof_resolve_effective_weapon_key(weapon_id)
+                edit = rof_get_edit_or_fallback(eff, weapon_id)
+            else
+                edit = rof_edits[weapon_id]
+            end
+        end
         if edit then
             applied = applied + apply_entry_with_levelups(entry, edit)
         end
@@ -678,7 +774,7 @@ local function read_live_values(weapon_key)
                 local wd; pcall(function() wd = dt:call("get_Item", i) end)
                 if wd then
                     local id = get_entry_id(wd)
-                    if id == weapon_key then
+                    if id == rof_catalog_id_for_key(weapon_key) then
                         local sd = resolve_shoot_data(wd)
                         if sd then
                             local vals = {
@@ -790,6 +886,20 @@ local function get_player_equipment()
     return pe
 end
 
+local function get_player_magazine_gun()
+    local pe = get_player_equipment()
+    if not pe then return nil end
+    local weapon = nil
+    pcall(function() weapon = pe:call("getEquipWeapon") end)
+    if not weapon then return nil end
+    local go = nil
+    pcall(function() go = weapon:call("get_GameObject") end)
+    if not go or not TYPE_PlayerMagazineGun then return nil end
+    local mg = nil
+    pcall(function() mg = go:call("getComponent(System.Type)", TYPE_PlayerMagazineGun) end)
+    return mg
+end
+
 local function get_weapon_id_from_pe(pe)
     if not pe then return nil end
     local eid = nil
@@ -824,35 +934,78 @@ local function get_equipped_weapon_id_cached()
     return cached_eid, cached_pe
 end
 
-local _any_recoil_anim_enabled = false
-local function refresh_any_recoil_anim()
-    for _, edit in pairs(rof_edits) do
-        if edit.recoil_anim_enabled then
-            _any_recoil_anim_enabled = true
-            return
-        end
-    end
-    _any_recoil_anim_enabled = false
+--- Stock on Matilda: same as vanilla attach shoot data (burst gating uses this).
+local function matilda_stock_attached()
+    local mg = get_player_magazine_gun()
+    if not mg then return false end
+    return try_field(mg, "_IsUseAttachShootData") == true
 end
-refresh_any_recoil_anim()
+
+local function player_is_leon()
+    local ctx = get_player()
+    if not ctx then return true end
+    local is_a0 = nil
+    pcall(function() is_a0 = ctx:call("get_IsCp_A0Character") end)
+    return is_a0 == true
+end
+
+--- Which rof_edits row applies for the currently equipped catalog id.
+rof_resolve_effective_weapon_key = function(base_id)
+    if not base_id then return nil end
+    if base_id == "arm0000" then
+        return matilda_stock_attached() and "arm0000_stock" or "arm0000"
+    end
+    if base_id == "arm0400" then
+        return player_is_leon() and "arm0400_leon" or "arm0400_grace"
+    end
+    return base_id
+end
+
+rof_get_edit_or_fallback = function(eff, base_id)
+    if not eff then return nil end
+    if rof_edits[eff] then return rof_edits[eff] end
+    if base_id and rof_edits[base_id] then return rof_edits[base_id] end
+    return nil
+end
+
+--- For auto-switching the editor when stock attaches or character changes.
+local function rof_equip_context_signature()
+    local base = get_equipped_weapon_id_cached()
+    if not base then return nil end
+    if base == "arm0000" then
+        return base .. ":" .. tostring(matilda_stock_attached())
+    end
+    if base == "arm0400" then
+        return base .. ":" .. (player_is_leon() and "leon" or "grace")
+    end
+    return base
+end
 
 local function get_recoil_anim_for_key(key)
-    local edit = key and rof_edits[key]
+    if not key then return false, 1.0, 1.0 end
+    local base_id = (key == "arm0000" or key == "arm0400") and key or nil
+    local eff = base_id and rof_resolve_effective_weapon_key(base_id) or key
+    local edit = rof_get_edit_or_fallback(eff, base_id)
+    if edit and edit.disabled then return false, 1.0, 1.0 end
     if edit and edit.recoil_anim_enabled ~= nil then
         return edit.recoil_anim_enabled, edit.recoil_anim_force or 1.0, edit.recoil_anim_speed or 1.0
     end
-    local def = key and rof_defaults[key]
+    local def = rof_defaults[eff] or (base_id and rof_defaults[base_id]) or rof_defaults[key]
     if def and def.recoil_anim_enabled ~= nil then
         return def.recoil_anim_enabled, def.recoil_anim_force or 1.0, def.recoil_anim_speed or 1.0
     end
     return false, 1.0, 1.0
 end
 
-local function apply_to_equipped(weapon_key, edit)
+--- Push live PlayerEquipment shot fields when `edit` is the active row for what is equipped.
+local function push_live_player_equipment_shoot_data(edit)
+    if not edit then return end
     local eid_str, pe = get_equipped_weapon_id()
-    if not pe or not eid_str then return false end
-    if eid_str ~= weapon_key then return false end
-
+    if not pe or not eid_str then return end
+    local base_arm = (eid_str == "arm0000" or eid_str == "arm0400") and eid_str or nil
+    local eff = rof_resolve_effective_weapon_key(eid_str)
+    local active = rof_get_edit_or_fallback(eff, base_arm)
+    if active ~= edit then return end
     if edit.ShotInterval then
         pcall(function() pe:set_field("_ShotInterval", edit.ShotInterval) end)
         pcall(function() pe:set_field("_CalcShotInterval", edit.ShotInterval) end)
@@ -860,7 +1013,40 @@ local function apply_to_equipped(weapon_key, edit)
     if edit.TypeOfShoot ~= nil then
         pcall(function() pe:set_field("_EquipShotType", edit.TypeOfShoot) end)
     end
+end
+
+local function push_live_for_current_equipment()
+    local eid_str, pe = get_equipped_weapon_id()
+    if not pe or not eid_str then return end
+    local base_arm = (eid_str == "arm0000" or eid_str == "arm0400") and eid_str or nil
+    local eff = rof_resolve_effective_weapon_key(eid_str)
+    local edit = rof_get_edit_or_fallback(eff, base_arm)
+    if edit then
+        push_live_player_equipment_shoot_data(edit)
+    end
+end
+
+local function apply_to_equipped(weapon_key, edit)
+    if not weapon_key or not edit or edit.disabled then return false end
+    local eid_str, pe = get_equipped_weapon_id()
+    if not pe or not eid_str then return false end
+    if rof_catalog_id_for_key(weapon_key) ~= eid_str then return false end
+    local eff_now = rof_resolve_effective_weapon_key(eid_str)
+    if weapon_key ~= eff_now then return false end
+    push_live_player_equipment_shoot_data(edit)
     return true
+end
+
+--- When this profile row matches equipped weapon, set live fire mode (used if edit.disabled blocks apply_to_equipped).
+local function push_equip_shot_type_if_matches(weapon_key, type_of_shoot)
+    if not weapon_key or type_of_shoot == nil then return end
+    local eid_str, pe = get_equipped_weapon_id()
+    if not pe or not eid_str then return end
+    if rof_catalog_id_for_key(weapon_key) ~= eid_str then return end
+    local eff_now = rof_resolve_effective_weapon_key(eid_str)
+    if weapon_key ~= eff_now then return end
+    local v = math.floor(tonumber(type_of_shoot) + 0.5)
+    pcall(function() pe:set_field("_EquipShotType", v) end)
 end
 
 -- Hotkey system for fire mode toggle
@@ -895,6 +1081,7 @@ local smooth_semi = {
     display_mode = nil,
     last_pe = nil,
     last_weapon_id = nil,
+    last_eff_key = nil,
 }
 
 local function smooth_semi_set_dss(pe, value)
@@ -923,6 +1110,7 @@ local smooth_burst = {
     display_mode = nil,
     last_pe = nil,
     last_weapon_id = nil,
+    last_eff_key = nil,
 }
 
 local function smooth_get_display_mode()
@@ -938,16 +1126,21 @@ local function cycle_fire_mode()
     if not pe or not eid_str then return end
     if not WEAPON_NAMES[eid_str] then return end
 
+    local base_arm = (eid_str == "arm0000" or eid_str == "arm0400") and eid_str or nil
+    local eff = rof_resolve_effective_weapon_key(eid_str)
+    local edit = rof_get_edit_or_fallback(eff, base_arm)
+    if edit and edit.disabled then return end
+
     local current = nil
     pcall(function() current = pe:get_field("_EquipShotType") end)
     if current == nil then return end
     current = smooth_get_display_mode() or tonumber(current) or 0
 
-    local edit = rof_edits[eid_str] or {}
+    local allow_src = edit or {}
     local allow = {
-        [0] = edit.allow_semi ~= false,
-        [1] = edit.allow_full ~= false,
-        [2] = edit.allow_burst ~= false,
+        [0] = allow_src.allow_semi ~= false,
+        [1] = allow_src.allow_full ~= false,
+        [2] = allow_src.allow_burst ~= false,
     }
     if fire_mode_limit_semi_full then allow[2] = false end
 
@@ -996,8 +1189,7 @@ local function cycle_fire_mode()
     end
 
     if selected_index then
-        local sel_key = dropdown_items[selected_index]
-        if sel_key == eid_str then
+        if dropdown_items[selected_index] == eff then
             ui_state.type_of_shoot = next_mode
         end
     end
@@ -1019,9 +1211,11 @@ end)
 local function get_burst_num_for_equipped()
     local eid_str = cached_eid or get_weapon_id_from_pe(get_player_equipment())
     if not eid_str then return 3 end
-    local edit = rof_edits[eid_str]
+    local base_arm = (eid_str == "arm0000" or eid_str == "arm0400") and eid_str or nil
+    local eff = rof_resolve_effective_weapon_key(eid_str)
+    local edit = rof_get_edit_or_fallback(eff, base_arm)
     if edit and edit.BurstNum then return edit.BurstNum end
-    local def = rof_defaults[eid_str]
+    local def = rof_defaults[eff] or (base_arm and rof_defaults[base_arm]) or rof_defaults[eid_str]
     if def and def.BurstNum then return def.BurstNum end
     return 3
 end
@@ -1063,29 +1257,35 @@ re.on_application_entry("UpdateHID", function()
     if not pe then
         smooth_semi.last_pe = nil
         smooth_semi.last_weapon_id = nil
+        smooth_semi.last_eff_key = nil
         smooth_burst.last_pe = nil
         smooth_burst.last_weapon_id = nil
+        smooth_burst.last_eff_key = nil
         return
     end
 
     local cur_weapon_id = get_weapon_id_from_pe(pe)
     cached_eid = cur_weapon_id
+    local cur_eff = cur_weapon_id and rof_resolve_effective_weapon_key(cur_weapon_id) or nil
 
     local pe_changed = (pe ~= smooth_semi.last_pe)
     local weapon_changed = (cur_weapon_id ~= smooth_semi.last_weapon_id)
+    local eff_changed = (cur_eff ~= smooth_semi.last_eff_key)
     smooth_semi.last_pe = pe
     smooth_semi.last_weapon_id = cur_weapon_id
+    smooth_semi.last_eff_key = cur_eff
     smooth_burst.last_pe = pe
     smooth_burst.last_weapon_id = cur_weapon_id
+    smooth_burst.last_eff_key = cur_eff
 
-    if (pe_changed or weapon_changed) and smooth_semi.active then
+    if (pe_changed or weapon_changed or eff_changed) and smooth_semi.active then
         smooth_semi.has_fired = false
         smooth_semi.shoot_held = false
         smooth_semi.active = false
         smooth_semi.display_mode = nil
         smooth_semi_set_dss(pe, false)
     end
-    if (pe_changed or weapon_changed) and smooth_burst.active then
+    if (pe_changed or weapon_changed or eff_changed) and smooth_burst.active then
         smooth_burst.shot_count = 0
         smooth_burst.shoot_held = false
         smooth_burst.active = false
@@ -1093,8 +1293,10 @@ re.on_application_entry("UpdateHID", function()
         smooth_semi_set_dss(pe, false)
     end
 
-    if weapon_changed and cur_weapon_id then
-        local edit = rof_edits[cur_weapon_id] or {}
+    if (weapon_changed or eff_changed) and cur_weapon_id then
+        local base_arm = (cur_weapon_id == "arm0000" or cur_weapon_id == "arm0400") and cur_weapon_id or nil
+        local eff = rof_resolve_effective_weapon_key(cur_weapon_id)
+        local edit = rof_get_edit_or_fallback(eff, base_arm) or {}
         local allow_semi = edit.allow_semi ~= false
         local allow_full = edit.allow_full ~= false
         local allow_burst = edit.allow_burst ~= false
@@ -1117,7 +1319,7 @@ re.on_application_entry("UpdateHID", function()
     local shoot_held = rt_down or lmb_down
 
     -- Smooth Semi-Auto (exclude RPG-7)
-    if rof_settings.smooth_semi_auto and cur_weapon_id ~= "arm0700" then
+    if get_weapon_smooth_semi(cur_eff) and cur_weapon_id ~= "arm0700" then
         if shot_type == 0 or smooth_semi.active then
             if not smooth_semi.active then
                 smooth_semi.active = true
@@ -1147,7 +1349,7 @@ re.on_application_entry("UpdateHID", function()
     end
 
     -- Smooth Burst
-    if rof_settings.smooth_burst then
+    if get_weapon_smooth_burst(cur_eff) then
         if shot_type == 2 or smooth_burst.active then
             if not smooth_burst.active then
                 smooth_burst.active = true
@@ -1297,15 +1499,19 @@ local function set_regrip_condition_enabled(enabled)
         if not resident then return end
         local settings = resident:get_field("_Settings")
         if not settings then return end
+        local len = 0
+        pcall(function() len = settings:call("get_Count") or settings:get_field("Length") or 0 end)
         for _, idx in ipairs(REGRIP_CONDITION_INDICES) do
-            pcall(function()
-                local setting = settings:call("get_Item", idx)
-                if not setting then return end
-                local condition = setting:get_field("_Condition")
-                if not condition then return end
-                condition:set_field("_IsEnable", enabled)
-                ok = true
-            end)
+            if idx < len then
+                pcall(function()
+                    local setting = settings:call("get_Item", idx)
+                    if not setting then return end
+                    local condition = setting:get_field("_Condition")
+                    if not condition then return end
+                    condition:set_field("_IsEnable", enabled)
+                    ok = true
+                end)
+            end
         end
     end)
     return ok
@@ -1325,6 +1531,17 @@ end
 
 local _regrip_last_updater_addr = nil
 
+--- True after we last pushed custom BlendRate/Speed; clear vanilla layer once when leaving that state.
+local _recoil_anim_layer_custom = false
+
+local function rof_reset_recoil_anim_layer_to_vanilla(layer)
+    if not layer then return end
+    pcall(function()
+        layer:call("set_BlendRate", 1.0)
+        layer:call("set_Speed", 1.0)
+    end)
+end
+
 _bac_apply_override = function()
     if not rof_settings.enable_recoil_anim_override then return end
     if not get_player_is_holding() then return end
@@ -1332,16 +1549,28 @@ _bac_apply_override = function()
     if not eid then
         eid = get_equipped_weapon_id_cached()
     end
-    if not eid then return end
-    local enabled, force, speed = get_recoil_anim_for_key(eid)
-    if not enabled then return end
-    local layer, driver = get_body_add_ctrl_layer()
-    if layer then
-        pcall(function()
-            layer:call("set_BlendRate", force)
-            layer:call("set_Speed", speed)
-        end)
+    local layer = get_body_add_ctrl_layer()
+    if not layer then return end
+    if not eid then
+        if _recoil_anim_layer_custom then
+            rof_reset_recoil_anim_layer_to_vanilla(layer)
+            _recoil_anim_layer_custom = false
+        end
+        return
     end
+    local enabled, force, speed = get_recoil_anim_for_key(eid)
+    if not enabled then
+        if _recoil_anim_layer_custom then
+            rof_reset_recoil_anim_layer_to_vanilla(layer)
+            _recoil_anim_layer_custom = false
+        end
+        return
+    end
+    pcall(function()
+        layer:call("set_BlendRate", force)
+        layer:call("set_Speed", speed)
+    end)
+    _recoil_anim_layer_custom = true
 end
 
 re.on_pre_application_entry("LateUpdateBehavior", function()
@@ -1355,15 +1584,12 @@ re.on_pre_application_entry("LateUpdateBehavior", function()
     end
 
     if not rof_settings.enable_recoil_anim_override then return end
-    if not _any_recoil_anim_enabled then return end
 
     if not get_player_is_holding() then
-        local layer = get_body_add_ctrl_layer()
-        if layer then
-            pcall(function()
-                layer:call("set_BlendRate", 1.0)
-                layer:call("set_Speed", 1.0)
-            end)
+        if _recoil_anim_layer_custom then
+            local layer = get_body_add_ctrl_layer()
+            rof_reset_recoil_anim_layer_to_vanilla(layer)
+            _recoil_anim_layer_custom = false
         end
         return
     end
@@ -1375,16 +1601,28 @@ re.on_pre_application_entry("LateUpdateBehavior", function()
             if pe then eid = get_weapon_id_from_pe(pe) end
         end)
     end
-    if not eid then return end
-    local enabled, force, speed = get_recoil_anim_for_key(eid)
-    if not enabled then return end
     local layer = get_body_add_ctrl_layer()
-    if layer then
-        pcall(function()
-            layer:call("set_BlendRate", force)
-            layer:call("set_Speed", speed)
-        end)
+    if not layer then return end
+    if not eid then
+        if _recoil_anim_layer_custom then
+            rof_reset_recoil_anim_layer_to_vanilla(layer)
+            _recoil_anim_layer_custom = false
+        end
+        return
     end
+    local enabled, force, speed = get_recoil_anim_for_key(eid)
+    if not enabled then
+        if _recoil_anim_layer_custom then
+            rof_reset_recoil_anim_layer_to_vanilla(layer)
+            _recoil_anim_layer_custom = false
+        end
+        return
+    end
+    pcall(function()
+        layer:call("set_BlendRate", force)
+        layer:call("set_Speed", speed)
+    end)
+    _recoil_anim_layer_custom = true
 end)
 
 local _cached_gui_gameobj = nil
@@ -1463,6 +1701,44 @@ local function is_game_gui_active()
     return drawing == true
 end
 
+--- Rebuild rof_edits[key] from captured rof_defaults[key]. If keep_disabled, set disabled = true (vanilla + skip future edits).
+local function reset_weapon_edits_from_defaults(key, keep_disabled)
+    local def_key = rof_catalog_id_for_key(key)
+    if not key or not rof_defaults[def_key] then return false end
+    local def = rof_defaults[def_key]
+    rof_edits[key] = {
+        TypeOfShoot = def.TypeOfShoot,
+        ShotInterval = def.ShotInterval,
+        BurstShotInterval = def.BurstShotInterval,
+        BurstNum = def.BurstNum,
+        recoil = def.recoil and {
+            rate = def.recoil.rate,
+            yaw_s = def.recoil.yaw_s,
+            yaw_r = def.recoil.yaw_r,
+            pitch_s = def.recoil.pitch_s,
+            pitch_r = def.recoil.pitch_r,
+        } or nil,
+        shot_camera_shake_move = def.shot_camera_shake_move and {
+            tx_s = def.shot_camera_shake_move.tx_s,
+            tx_r = def.shot_camera_shake_move.tx_r,
+            ty_s = def.shot_camera_shake_move.ty_s,
+            ty_r = def.shot_camera_shake_move.ty_r,
+            tz_s = def.shot_camera_shake_move.tz_s,
+            tz_r = def.shot_camera_shake_move.tz_r,
+        } or nil,
+        recoil_anim_enabled = def.recoil_anim_enabled or false,
+        recoil_anim_force = def.recoil_anim_force or 1.0,
+        recoil_anim_speed = def.recoil_anim_speed or 1.0,
+        smooth_semi = nil,
+        smooth_burst = nil,
+        disabled = keep_disabled and true or nil,
+    }
+    populate_ui_from_vals(def, key)
+    apply_all_now()
+    push_live_player_equipment_shoot_data(rof_edits[key])
+    return true
+end
+
 re.on_draw_ui(function()
     if imgui.tree_node("Realistic Rate of Fire") then
         imgui.text_colored("Toggle Fire Mode With Assigned Hotkey (Default: B or L2(Left Trigger)+A(X))", 0xFFFFFF00)
@@ -1480,10 +1756,7 @@ re.on_draw_ui(function()
                 local pname = profile_state.names[profile_state.selected]
                 if pname and load_profile(pname) then
                     apply_all_now()
-                    refresh_any_recoil_anim()
-                    for k, edit in pairs(rof_edits) do
-                        apply_to_equipped(k, edit)
-                    end
+                    push_live_for_current_equipment()
                     save_profile_index()
                     ui_state.status = "Loaded profile: " .. pname
                 end
@@ -1619,6 +1892,7 @@ re.on_draw_ui(function()
                         layer:call("set_Speed", 1.0)
                     end
                 end)
+                _recoil_anim_layer_custom = false
             end
             save_settings()
             ui_state.status = "Recoil animation override " .. (rof_settings.enable_recoil_anim_override and "enabled" or "disabled")
@@ -1628,19 +1902,24 @@ re.on_draw_ui(function()
         local ssa_changed
         ssa_changed, rof_settings.smooth_semi_auto = imgui.checkbox("Improved Semi-Auto Recoil Animation", rof_settings.smooth_semi_auto)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Consecutive shots layer properly for a smoother animation")
+            imgui.set_tooltip("Global default for Improved Semi-Auto so that shots layer properly (can be overridden per weapon)")
         end
         if ssa_changed then
             save_settings()
             smooth_semi.has_fired = false
             smooth_semi.shoot_held = false
-            if not rof_settings.smooth_semi_auto and smooth_semi.active then
-                smooth_semi.active = false
-                smooth_semi.display_mode = nil
-                local pe = get_player_equipment()
-                if pe then
-                    pcall(function() pe:set_field("_EquipShotType", 0) end)
-                    smooth_semi_set_dss(pe, false)
+            if not rof_settings.smooth_semi_auto then
+                for _, e in pairs(rof_edits) do
+                    if e then e.smooth_semi = nil end
+                end
+                if smooth_semi.active then
+                    smooth_semi.active = false
+                    smooth_semi.display_mode = nil
+                    local pe = get_player_equipment()
+                    if pe then
+                        pcall(function() pe:set_field("_EquipShotType", 0) end)
+                        smooth_semi_set_dss(pe, false)
+                    end
                 end
             end
             ui_state.status = "Smooth Semi-Auto " .. (rof_settings.smooth_semi_auto and "enabled" or "disabled")
@@ -1649,19 +1928,24 @@ re.on_draw_ui(function()
         local sb_changed
         sb_changed, rof_settings.smooth_burst = imgui.checkbox("Improved Burst Recoil Animation", rof_settings.smooth_burst)
         if imgui.is_item_hovered() then
-            imgui.set_tooltip("Consecutive shots layer properly for a smoother animation")
+            imgui.set_tooltip("Global default for Improved Burst so that shots layer properly (can be overridden per weapon)")
         end
         if sb_changed then
             save_settings()
             smooth_burst.shot_count = 0
             smooth_burst.shoot_held = false
-            if not rof_settings.smooth_burst and smooth_burst.active then
-                smooth_burst.active = false
-                smooth_burst.display_mode = nil
-                local pe = get_player_equipment()
-                if pe then
-                    pcall(function() pe:set_field("_EquipShotType", 2) end)
-                    smooth_semi_set_dss(pe, false)
+            if not rof_settings.smooth_burst then
+                for _, e in pairs(rof_edits) do
+                    if e then e.smooth_burst = nil end
+                end
+                if smooth_burst.active then
+                    smooth_burst.active = false
+                    smooth_burst.display_mode = nil
+                    local pe = get_player_equipment()
+                    if pe then
+                        pcall(function() pe:set_field("_EquipShotType", 2) end)
+                        smooth_semi_set_dss(pe, false)
+                    end
                 end
             end
             ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
@@ -1776,6 +2060,13 @@ re.on_draw_ui(function()
             if equipped_key then
                 local eid_name = WEAPON_NAMES[equipped_key]
                 local is_known = eid_name ~= nil
+                if equipped_key == "arm0400" then
+                    eid_name = player_is_leon() and WEAPON_NAMES["arm0400_leon"] or WEAPON_NAMES["arm0400_grace"]
+                    is_known = eid_name ~= nil
+                elseif equipped_key == "arm0000" and matilda_stock_attached() then
+                    eid_name = WEAPON_NAMES["arm0000_stock"]
+                    is_known = true
+                end
                 eid_name = eid_name or equipped_key
 
                 imgui.text_colored("Equipped: ", 0xFFFFFF00)
@@ -1792,17 +2083,37 @@ re.on_draw_ui(function()
                     imgui.text_colored("(" .. mode_name .. ")", 0xFF0000FF)
                 end
 
-                -- Auto-select weapon if it changed
-                if equipped_key ~= last_equipped_id then
+                --[[ DEBUG only: extra PlayerMagazineGun getComponent every menu frame — keep commented (0 cost when off).
+                local mg = get_player_magazine_gun()
+                local attach_shoot = nil
+                if mg then
+                    attach_shoot = try_field(mg, "_IsUseAttachShootData")
+                end
+                local label = (attach_shoot == true) and "true" or (attach_shoot == false) and "false" or "N/A"
+                local color = (attach_shoot == true) and 0xFF00FF00 or 0xFF4444FF
+                -- imgui.text_colored("_IsUseAttachShootData: ", 0xFFFFFF00)
+                -- imgui.same_line()
+                -- imgui.text_colored(label, color)
+                if not mg then
+                    imgui.same_line()
+                    imgui.text_colored(" (MagazineGun not found)", 0xFF8888FF)
+                end
+                --]]
+
+                -- Auto-select weapon row when equip id, stock, or character context changes
+                local sig_now = rof_equip_context_signature()
+                if sig_now and sig_now ~= last_equip_context_sig then
+                    local eff = rof_resolve_effective_weapon_key(equipped_key)
                     for i, key in ipairs(dropdown_items) do
-                        if key == equipped_key then
+                        if key == eff then
                             selected_index = i
-                            local vals = rof_edits[key] or rof_defaults[key] or read_live_values(key)
+                            local vals = rof_edits[key] or rof_defaults[key] or rof_defaults[rof_catalog_id_for_key(key)]
+                                or read_live_values(key)
                             populate_ui_from_vals(vals, key)
                             break
                         end
                     end
-                    last_equipped_id = equipped_key
+                    last_equip_context_sig = sig_now
                 end
             else
                 imgui.text_colored("Equipped: (waiting...)", 0xFFFFFF00)
@@ -1816,9 +2127,97 @@ re.on_draw_ui(function()
         if selected_index > #dropdown_items then selected_index = #dropdown_items end
         if changed then
             local key = dropdown_items[selected_index]
-            local vals = rof_edits[key] or rof_defaults[key] or read_live_values(key)
+            local vals = rof_edits[key] or rof_defaults[key] or rof_defaults[rof_catalog_id_for_key(key)]
+                or read_live_values(key)
             populate_ui_from_vals(vals, key)
         end
+
+        local weapon_disabled = false
+        do
+            local key = dropdown_items[selected_index]
+            if key then
+                local edit = rof_edits[key]
+                if not edit then edit = {}; rof_edits[key] = edit end
+                local dis_changed, dis_new = imgui.checkbox("Disable All Modifications##pw_dis", edit.disabled or false)
+                if dis_changed then
+                    if dis_new then
+                        if smooth_semi.active then
+                            smooth_semi.active = false
+                            smooth_semi.display_mode = nil
+                            smooth_semi.has_fired = false
+                            local pe = get_player_equipment()
+                            if pe then
+                                pcall(function() pe:set_field("_EquipShotType", 0) end)
+                                smooth_semi_set_dss(pe, false)
+                            end
+                        end
+                        if smooth_burst.active then
+                            smooth_burst.active = false
+                            smooth_burst.display_mode = nil
+                            smooth_burst.shot_count = 0
+                            local pe = get_player_equipment()
+                            if pe then
+                                pcall(function() pe:set_field("_EquipShotType", 2) end)
+                                smooth_semi_set_dss(pe, false)
+                            end
+                        end
+                        if reset_weapon_edits_from_defaults(key, true) then
+                            ui_state.status = "Disabled all mods (restored defaults): " .. (WEAPON_NAMES[key] or key)
+                        else
+                            edit.disabled = true
+                            apply_all_now()
+                            ui_state.status = "Disabled all mods (no captured defaults — capture first to restore vanilla): " .. (WEAPON_NAMES[key] or key)
+                        end
+                    else
+                        local restored = restore_weapon_edit_from_active_profile(key)
+                        if not restored and rof_edits[key] then
+                            rof_edits[key].disabled = nil
+                        end
+                        apply_all_now()
+                        push_live_for_current_equipment()
+                        if restored then
+                            ui_state.status = (WEAPON_NAMES[key] or key) .. " modifications enabled (from profile)"
+                        else
+                            ui_state.status = (WEAPON_NAMES[key] or key)
+                                .. " modifications enabled (no entry in profile file — save profile to persist)"
+                        end
+                    end
+                end
+                if imgui.is_item_hovered() then
+                    imgui.set_tooltip("Skip all mod edits for this weapon — it will use vanilla game values")
+                end
+                local cur_edit = rof_edits[key]
+                weapon_disabled = (cur_edit and cur_edit.disabled) or false
+            end
+        end
+
+        if weapon_disabled then
+            imgui.text_colored("(All modifications disabled for this weapon)", 0xFF8888FF)
+            imgui.spacing()
+            imgui.text_colored("TypeOfShoot (hotkey cycling off for this weapon)", 0xFFFFFF00)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip(
+                    "Same idea as global Disable Select Fire: use this dropdown instead of the fire-mode hotkey while this weapon has all modifications disabled."
+                )
+            end
+            do
+                local key = dropdown_items[selected_index]
+                local shoot_idx = math.floor(ui_state.type_of_shoot + 1)
+                if shoot_idx < 1 then shoot_idx = 1 end
+                if shoot_idx > 3 then shoot_idx = 3 end
+                local d_changed, d_new = imgui.combo("TypeOfShoot##pw_dis", shoot_idx, SHOOT_TYPES)
+                if d_changed and key then
+                    ui_state.type_of_shoot = d_new - 1
+                    if not rof_edits[key] then rof_edits[key] = {} end
+                    rof_edits[key].TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5)
+                    apply_all_now()
+                    push_equip_shot_type_if_matches(key, ui_state.type_of_shoot)
+                    ui_state.status = "Fire mode: " .. (SHOOT_TYPES[d_new] or tostring(d_new))
+                end
+            end
+        end
+
+        if not weapon_disabled then
 
         do
             local key = dropdown_items[selected_index]
@@ -1844,17 +2243,112 @@ re.on_draw_ui(function()
             end
         end
 
+        do
+            local key = dropdown_items[selected_index]
+            if key then
+                local edit = rof_edits[key]
+                if not edit then edit = {}; rof_edits[key] = edit end
+
+                local g_semi = rof_settings.smooth_semi_auto
+                local g_burst = rof_settings.smooth_burst
+
+                if not g_semi then
+                    if edit.smooth_semi and smooth_semi.active then
+                        smooth_semi.active = false
+                        smooth_semi.display_mode = nil
+                        smooth_semi.has_fired = false
+                        local pe = get_player_equipment()
+                        if pe then
+                            pcall(function() pe:set_field("_EquipShotType", 0) end)
+                            smooth_semi_set_dss(pe, false)
+                        end
+                    end
+                    edit.smooth_semi = nil
+                end
+                if not g_burst then
+                    if edit.smooth_burst and smooth_burst.active then
+                        smooth_burst.active = false
+                        smooth_burst.display_mode = nil
+                        smooth_burst.shot_count = 0
+                        local pe = get_player_equipment()
+                        if pe then
+                            pcall(function() pe:set_field("_EquipShotType", 2) end)
+                            smooth_semi_set_dss(pe, false)
+                        end
+                    end
+                    edit.smooth_burst = nil
+                end
+
+                if g_semi or g_burst then
+                    if g_semi then
+                        local pw_semi = edit.smooth_semi
+                        if pw_semi == nil then pw_semi = g_semi end
+                        local pss_changed
+                        pss_changed, pw_semi = imgui.checkbox("Improved Semi-Auto##pw", pw_semi)
+                        if imgui.is_item_hovered() then
+                            imgui.set_tooltip("Semi-Auto animations layer properly")
+                        end
+                        if pss_changed then
+                            edit.smooth_semi = pw_semi
+                            if not pw_semi and smooth_semi.active then
+                                smooth_semi.active = false
+                                smooth_semi.display_mode = nil
+                                smooth_semi.has_fired = false
+                                local pe = get_player_equipment()
+                                if pe then
+                                    pcall(function() pe:set_field("_EquipShotType", 0) end)
+                                    smooth_semi_set_dss(pe, false)
+                                end
+                            end
+                        end
+                    end
+                    if g_burst then
+                        if g_semi then imgui.same_line() end
+                        local pw_burst = edit.smooth_burst
+                        if pw_burst == nil then pw_burst = g_burst end
+                        local psb_changed
+                        psb_changed, pw_burst = imgui.checkbox("Improved Burst##pw", pw_burst)
+                        if imgui.is_item_hovered() then
+                            imgui.set_tooltip(
+                                "Burst animations layer properly")
+                        end
+                        if psb_changed then
+                            edit.smooth_burst = pw_burst
+                            if not pw_burst and smooth_burst.active then
+                                smooth_burst.active = false
+                                smooth_burst.display_mode = nil
+                                smooth_burst.shot_count = 0
+                                local pe = get_player_equipment()
+                                if pe then
+                                    pcall(function() pe:set_field("_EquipShotType", 2) end)
+                                    smooth_semi_set_dss(pe, false)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         local any_changed = false
-        local shoot_idx = math.floor(ui_state.type_of_shoot + 1)
-        if shoot_idx < 1 then shoot_idx = 1 end
-        if shoot_idx > 3 then shoot_idx = 3 end
-        changed, shoot_idx = imgui.combo("TypeOfShoot", shoot_idx, SHOOT_TYPES)
-        if changed then ui_state.type_of_shoot = shoot_idx - 1; any_changed = true end
+        if rof_settings.disable_select_fire then
+            local shoot_idx = math.floor(ui_state.type_of_shoot + 1)
+            if shoot_idx < 1 then shoot_idx = 1 end
+            if shoot_idx > 3 then shoot_idx = 3 end
+            changed, shoot_idx = imgui.combo("TypeOfShoot", shoot_idx, SHOOT_TYPES)
+            if changed then ui_state.type_of_shoot = shoot_idx - 1; any_changed = true end
+        end
 
         changed, ui_state.shot_interval = imgui.drag_float("ShotInterval", ui_state.shot_interval, 0.01, 0.0, 10.0)
         if changed then any_changed = true end
-        changed, ui_state.burst_shot_interval = imgui.drag_float("BurstShotInterval", ui_state.burst_shot_interval, 0.01, 0.0, 10.0)
-        if changed then any_changed = true end
+        do
+            local key = dropdown_items[selected_index]
+            local wp_smooth_burst = get_weapon_smooth_burst(key)
+            if not wp_smooth_burst then
+                changed, ui_state.burst_shot_interval = imgui.drag_float("BurstShotInterval", ui_state.burst_shot_interval, 0.01, 0.0, 10.0)
+                if changed then any_changed = true end
+            end
+        end
         changed, ui_state.burst_num = imgui.drag_float("BurstNum", ui_state.burst_num, 1.0, 0.0, 20.0)
         if changed then any_changed = true end
 
@@ -1897,11 +2391,11 @@ re.on_draw_ui(function()
                         bac_layer:call("set_BlendRate", 1.0)
                         bac_layer:call("set_Speed", 1.0)
                     end)
+                    _recoil_anim_layer_custom = false
                 end
                 ra_enabled = lock_new
                 ra_force = rof_edits[wkey].recoil_anim_force or 1.0
                 ra_speed = rof_edits[wkey].recoil_anim_speed or 1.0
-                refresh_any_recoil_anim()
             end
 
             if ra_enabled then
@@ -1910,6 +2404,7 @@ re.on_draw_ui(function()
                 if not rof_edits[wkey] then rof_edits[wkey] = {} end
                 rof_edits[wkey].recoil_anim_force = br_new
                 pcall(function() bac_layer:call("set_BlendRate", br_new) end)
+                _recoil_anim_layer_custom = true
             end
 
             local spd_changed, spd_new = imgui.drag_float("Recoil Animation Speed", ra_speed, 0.1, 0.0, 100.0)
@@ -1917,6 +2412,7 @@ re.on_draw_ui(function()
                 if not rof_edits[wkey] then rof_edits[wkey] = {} end
                 rof_edits[wkey].recoil_anim_speed = spd_new
                 pcall(function() bac_layer:call("set_Speed", spd_new) end)
+                _recoil_anim_layer_custom = true
             end
             end
         else
@@ -1928,7 +2424,7 @@ re.on_draw_ui(function()
         imgui.text_colored("Shot Camera Shake:", 0xFFFFFF00)
         do
             local wkey = dropdown_items[selected_index]
-            local wd = wkey and find_weapon_data_by_key(wkey)
+            local wd = wkey and find_weapon_data_by_key(rof_catalog_id_for_key(wkey))
             local move = wd and resolve_shot_camera_shake_move(wd)
             if move then
                 local move_type = move:get_type_definition()
@@ -1993,43 +2489,19 @@ re.on_draw_ui(function()
             end
         end
 
+        end -- if not weapon_disabled
+
+        --[[
         if imgui.button("Capture Defaults") then
           local defaults = capture_defaults()
           local n = 0; for _ in pairs(defaults) do n = n + 1 end
           ui_state.status = "Captured defaults for " .. tostring(n) .. " weapons"
         end
+        --]]
 
         if imgui.button("Reset Current Weapon") then
             local key = dropdown_items[selected_index]
-            if key and rof_defaults[key] then
-                local def = rof_defaults[key]
-                rof_edits[key] = {
-                    TypeOfShoot = def.TypeOfShoot,
-                    ShotInterval = def.ShotInterval,
-                    BurstShotInterval = def.BurstShotInterval,
-                    BurstNum = def.BurstNum,
-                    recoil = def.recoil and {
-                        rate = def.recoil.rate,
-                        yaw_s = def.recoil.yaw_s,
-                        yaw_r = def.recoil.yaw_r,
-                        pitch_s = def.recoil.pitch_s,
-                        pitch_r = def.recoil.pitch_r,
-                    } or nil,
-                    shot_camera_shake_move = def.shot_camera_shake_move and {
-                        tx_s = def.shot_camera_shake_move.tx_s,
-                        tx_r = def.shot_camera_shake_move.tx_r,
-                        ty_s = def.shot_camera_shake_move.ty_s,
-                        ty_r = def.shot_camera_shake_move.ty_r,
-                        tz_s = def.shot_camera_shake_move.tz_s,
-                        tz_r = def.shot_camera_shake_move.tz_r,
-                    } or nil,
-                    recoil_anim_enabled = def.recoil_anim_enabled or false,
-                    recoil_anim_force = def.recoil_anim_force or 1.0,
-                    recoil_anim_speed = def.recoil_anim_speed or 1.0
-                }
-                populate_ui_from_vals(def, key)
-                apply_all_now()
-                refresh_any_recoil_anim()
+            if key and reset_weapon_edits_from_defaults(key, false) then
                 ui_state.status = "Reset " .. (WEAPON_NAMES[key] or key) .. " to defaults"
             elseif key then
                 ui_state.status = "No defaults saved for " .. (WEAPON_NAMES[key] or key) .. " (capture first)"
@@ -2061,7 +2533,10 @@ re.on_draw_ui(function()
                     } or nil,
                     recoil_anim_enabled = def.recoil_anim_enabled or false,
                     recoil_anim_force = def.recoil_anim_force or 1.0,
-                    recoil_anim_speed = def.recoil_anim_speed or 1.0
+                    recoil_anim_speed = def.recoil_anim_speed or 1.0,
+                    smooth_semi = nil,
+                    smooth_burst = nil,
+                    disabled = nil,
                 }
                 if def.EnableAimCameraShake ~= nil then
                     ui_state.enable_aim_camera_shake = def.EnableAimCameraShake
@@ -2069,7 +2544,6 @@ re.on_draw_ui(function()
                 count = count + 1
             end
             apply_all_now()
-            refresh_any_recoil_anim()
             local key = dropdown_items[selected_index]
             if key then
                 populate_ui_from_vals(rof_defaults[key], key)
