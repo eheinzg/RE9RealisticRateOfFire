@@ -1534,25 +1534,6 @@ local _regrip_last_updater_addr = nil
 --- True after we last pushed custom BlendRate/Speed; clear vanilla layer once when leaving that state.
 local _recoil_anim_layer_custom = false
 
---- The breath hold in re9holdbreath (shared by Iron Sights and RE9 Laser) pins this
---- exact layer — app.BodyAddCtrlDriver's TreeLayer — to a manual frame at Speed 0 while
---- it is engaged, and re-stamps it several times per frame including from its own
---- execFire hook. Our recoil-animation override writes BlendRate/Speed to the same
---- layer, per frame and from execFire too, so with both mods running the layer is
---- driven by two writers to two different values every frame. That is judder, and it
---- shows up while SHOOTING because that is when both execFire writes join in.
----
---- One owner wins: the hold has it pinned, so stand off until it lets go. Nothing to
---- re-arm afterwards — the passes below run every frame and reassert immediately.
---- Absent module, older module without the accessor, or a hold that isn't pinning
---- (plain first person is the common case) all read false and change nothing.
-local function rof_holdbreath_owns_bac()
-    local hb = rawget(_G, "__RE9HoldBreath")
-    if type(hb) ~= "table" or type(hb.owns_body_add) ~= "function" then return false end
-    local ok, owns = pcall(hb.owns_body_add)
-    return ok and owns == true
-end
-
 local function rof_reset_recoil_anim_layer_to_vanilla(layer)
     if not layer then return end
     pcall(function()
@@ -1563,7 +1544,6 @@ end
 
 _bac_apply_override = function()
     if not rof_settings.enable_recoil_anim_override then return end
-    if rof_holdbreath_owns_bac() then return end
     if not get_player_is_holding() then return end
     local eid = cached_eid
     if not eid then
@@ -1604,9 +1584,6 @@ re.on_pre_application_entry("LateUpdateBehavior", function()
     end
 
     if not rof_settings.enable_recoil_anim_override then return end
-    -- Including the vanilla reset below: while the hold owns the layer, even handing it
-    -- back to 1.0/1.0 is a stomp on a pinned frame.
-    if rof_holdbreath_owns_bac() then return end
 
     if not get_player_is_holding() then
         if _recoil_anim_layer_custom then
