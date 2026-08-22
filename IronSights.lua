@@ -59,19 +59,19 @@ local DEFAULT_OFFSETS = {
     ["arm0003"]       = { x =  0.0,    y = -0.032, z = 0.0 },
     ["arm0004"]       = { x =  0.0,    y = -0.020, z = 0.0 },
     ["arm0005"]       = { x = -0.002,  y = -0.050, z = 0.0 },
-    ["arm0006"]       = { x =  0.0,    y = -0.037, z = 0.0 },
+    ["arm0006"]       = { x = -0.001,  y = -0.037, z = 0.0 },
     ["arm0007"]       = { x =  0.0,    y = -0.039, z = 0.0 },
     ["arm0100"]       = { x =  0.0,    y = -0.071, z = 0.0 },
     ["arm0103"]       = { x =  0.0,    y = -0.066, z = 0.0 },
     ["arm0104"]       = { x =  0.0,    y = -0.068, z = 0.0 },
     ["arm0400_leon"]  = { x = -0.002,  y = -0.040, z = 0.0 },
     ["arm0400_grace"] = { x =  0.001,  y = -0.036, z = 0.0 },
-    ["arm0500"]       = { x =  0.0,    y = -0.055, z = 0.0 },
+    ["arm0500"]       = { x =  0.0005, y = -0.059, z = 0.0 },
     ["arm0501"]       = { x =  0.0,    y = -0.044, z = 0.0 },
     ["arm0503"]       = { x = -0.045,  y = -0.026, z = 0.0 },
     ["arm0505"]       = { x =  0.001,    y = -0.0420, z = 0.0 },
-    ["arm0600"]       = { x =  0.0,    y = -0.055, z = 0.0 },
-    ["arm0601"]       = { x =  0.0,    y = -0.047, z = 0.0 },
+    ["arm0600"]       = { x =  0.0,    y = -0.064, z = 0.0 },
+    ["arm0601"]       = { x =  -0.0005,    y = -0.048, z = 0.0 },
     ["arm0700"]       = { x =  0.0,    y =  0.0,   z = 0.0 },
 }
 
@@ -125,12 +125,14 @@ local DEFAULT_COVER_OFFSETS = {
     ["arm0104|CoverActionLeft"]  = { x =  0.019, y = -0.067, z = 0.0 },
     ["arm0400_leon|CoverActionRight"]  = { x = -0.009, y = -0.047, z = 0.0 },
     ["arm0400_leon|CoverActionLeft"]   = { x =  0.009, y = -0.047, z = 0.0 },
-    ["arm0400_grace|CoverActionRight"] = { x = -0.014, y = -0.026, z = 0.0 },
-    ["arm0400_grace|CoverActionLeft"]  = { x =  0.016, y = -0.030, z = 0.0 },
+    ["arm0400_grace|CoverActionRight"] = { x = -0.015, y = -0.023, z = 0.0 },
+    ["arm0400_grace|CoverActionLeft"]  = { x =  0.014, y = -0.026, z = 0.0 },
     ["arm0500|CoverActionRight"] = { x = -0.019, y = -0.059, z = 0.0 },
     ["arm0500|CoverActionLeft"]  = { x =  0.019, y = -0.059, z = 0.0 },
     ["arm0501|CoverActionRight"] = { x = -0.014, y = -0.065, z = 0.0 },
     ["arm0501|CoverActionLeft"]  = { x =  0.014, y = -0.065, z = 0.0 },
+    ["arm0505|CoverActionRight"] = { x = -0.019, y = -0.033, z = 0.0 },
+    ["arm0505|CoverActionLeft"]  = { x =  0.019, y = -0.033, z = 0.0 },
     ["arm0600|CoverActionRight"] = { x = -0.020, y = -0.060, z = 0.0 },
     ["arm0600|CoverActionLeft"]  = { x =  0.020, y = -0.060, z = 0.0 },
     ["arm0601|CoverActionRight"] = { x = -0.015, y = -0.049, z = 0.0 },
@@ -163,6 +165,13 @@ local function set_cover_offset(weapon_key, cover_state, x, y, z)
     local k = weapon_key .. "|" .. cover_state
     cover_offsets[k] = { x = x, y = y, z = z }
     save_cover_offsets()
+end
+
+--- Saved value, or bundled default (for UI / first edit before key exists in JSON).
+local function effective_cover_offset(weapon_key, cover_state)
+    local o = get_cover_offset(weapon_key, cover_state)
+    if o then return o end
+    return DEFAULT_COVER_OFFSETS[weapon_key .. "|" .. cover_state]
 end
 
 -- Per-weapon offsets when Standard FPS Mode is ON (default: x=-0.09 like STANDARD_FPS_X)
@@ -216,8 +225,8 @@ local DEFAULT_CANTED_OFFSETS = {
     arm0501       = { arm_hand_rotation = { x = 20.0,  y = -5.5,  z = -22.0 }, arm_lower_rotation = { x = 16.0,  y = 10.0,  z = 4.5 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
     arm0503       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -7.5,  y = 6.0,   z = 1.0 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
     arm0505       = { arm_hand_rotation = { x = 23.5,  y = 6.5,   z = -7.0 },  arm_lower_rotation = { x = 16.0,  y = -5.5,  z = -1.5 }, arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
-    arm0600       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -5.5,  y = 14.5,  z = -0.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = -11.5 } },
-    arm0601       = { arm_hand_rotation = { x = 18.0,  y = -19.5, z = -4.5 },  arm_lower_rotation = { x = -5.5,  y = 14.5,  z = -0.5 }, arm_upper_rotation = { x = -6.0,  y = -3.5,  z = -11.5 } },
+    arm0600       = { arm_hand_rotation = { x = 31.0,  y = -2.0,  z = 3.5 },  arm_lower_rotation = { x = 0,  y = 0,  z = 0 }, arm_upper_rotation = { x = 0,  y = 0,  z = 0 } },
+    arm0601       = { arm_hand_rotation = { x = 31.0,  y = -1.0,  z = 3.5 },  arm_lower_rotation = { x = 0,  y = 0,  z = 0 }, arm_upper_rotation = { x = 0,  y = 0,  z = 0 } },
     arm0700       = { arm_hand_rotation = { x = 0.0,  y = 0.0,  z = 0.0 }, arm_lower_rotation = { x = 0.0,  y = 0.0,  z = 0.0 },  arm_upper_rotation = { x = 0.0,  y = 0.0,   z = 0.0 } },
 }
 local arm_hand_rotations = {}
@@ -250,18 +259,70 @@ local function set_arm_upper_rotation(weapon_key, x, y, z)
     arm_upper_rotations[weapon_key] = { x = x, y = y, z = z }
 end
 
+-- Per-weapon hand/finger joint rotations, keyed by the joint's OWN name. Unlike the three arm
+-- joints above there is no right-authored/left-mirrored pairing here: the left hand is the
+-- support hand and grips a completely different part of the weapon, so every joint carries its
+-- own X/Y/Z. Joint names are discovered from the live skeleton (see collect_finger_joints), never
+-- hardcoded, so this works for whatever the model actually ships.
+local finger_rotations = {}
+-- Set whenever the values or the resolved joints change; the apply path recompiles its list.
+local finger_apply_dirty = true
+local _fj_m4a1_sig = ""   -- last published finger values baked into _fj_list
+
+local function get_finger_rotation(weapon_key, joint_name)
+    -- Same override, one level deeper: the publishing mod names the joints it
+    -- owns, so a joint it does not mention still comes from the json.
+    local o = rawget(_G, "M4A1_ArmPose")
+    if type(o) == "table" and o.key == weapon_key and type(o.fingers) == "table" then
+        local ft = o.fingers[joint_name]
+        if type(ft) == "table" then
+            return { x = ft.x or 0.0, y = ft.y or 0.0, z = ft.z or 0.0 }
+        end
+    end
+    local w = weapon_key and finger_rotations[weapon_key]
+    local t = w and w[joint_name]
+    if not t then return { x = 0.0, y = 0.0, z = 0.0 } end
+    return { x = t.x or 0.0, y = t.y or 0.0, z = t.z or 0.0 }
+end
+
+local function set_finger_rotation(weapon_key, joint_name, x, y, z)
+    if not weapon_key or not joint_name then return end
+    local w = finger_rotations[weapon_key]
+    if not w then w = {}; finger_rotations[weapon_key] = w end
+    -- Drop back to nil at zero so untouched joints never reach the save file or the apply list
+    if math.abs(x) < 0.0001 and math.abs(y) < 0.0001 and math.abs(z) < 0.0001 then
+        w[joint_name] = nil
+    else
+        w[joint_name] = { x = x, y = y, z = z }
+    end
+    finger_apply_dirty = true
+end
+
+local function clear_finger_rotations(weapon_key, name_filter)
+    local w = weapon_key and finger_rotations[weapon_key]
+    if not w then return end
+    for jname in pairs(w) do
+        if not name_filter or name_filter[jname] then w[jname] = nil end
+    end
+    finger_apply_dirty = true
+end
+
 local function save_arm_hand_rotation()
+    finger_apply_dirty = true
     if _ah_off_cache_valid ~= nil then _ah_off_cache_valid = false end
     local out = {}
     local keys = {}
     for k in pairs(arm_hand_rotations) do keys[k] = true end
     for k in pairs(arm_lower_rotations) do keys[k] = true end
     for k in pairs(arm_upper_rotations) do keys[k] = true end
+    for k in pairs(finger_rotations) do keys[k] = true end
     for wkey in pairs(keys) do
         local h = arm_hand_rotations[wkey] or { x = 0, y = 0, z = 0 }
         local l = arm_lower_rotations[wkey] or { x = 0, y = 0, z = 0 }
         local u = arm_upper_rotations[wkey] or { x = 0, y = 0, z = 0 }
         out[wkey] = { arm_hand_rotation = h, arm_lower_rotation = l, arm_upper_rotation = u }
+        local f = finger_rotations[wkey]
+        if f and next(f) ~= nil then out[wkey].finger_rotations = f end
     end
     json.dump_file(ARM_HAND_SETTINGS_PATH, out)
 end
@@ -313,6 +374,20 @@ local function load_arm_hand_rotation()
             if entry.arm_upper_rotation and type(entry.arm_upper_rotation) == "table" then
                 local u = entry.arm_upper_rotation
                 arm_upper_rotations[wkey] = { x = type(u.x) == "number" and u.x or 0, y = type(u.y) == "number" and u.y or 0, z = type(u.z) == "number" and u.z or 0 }
+            end
+            if entry.finger_rotations and type(entry.finger_rotations) == "table" then
+                local dst = {}
+                for jname, r in pairs(entry.finger_rotations) do
+                    if type(jname) == "string" and type(r) == "table" then
+                        local fx = type(r.x) == "number" and r.x or 0
+                        local fy = type(r.y) == "number" and r.y or 0
+                        local fz = type(r.z) == "number" and r.z or 0
+                        if fx ~= 0 or fy ~= 0 or fz ~= 0 then
+                            dst[jname] = { x = fx, y = fy, z = fz }
+                        end
+                    end
+                end
+                if next(dst) ~= nil then finger_rotations[wkey] = dst end
             end
         end
     end
@@ -411,7 +486,7 @@ local function arm_upper_offset_quat_l(rot)
     return euler_deg_to_quat(-rot.x, rot.y, -rot.z)
 end
 
-local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, ha_hold_to_activate = true, ha_breath_duration = 3.5, ha_apply_min_fit_rate = true, zero_min_fit_rate = false, perfect_focus = true, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true, auto_iron_sight = true, arm_rotation_enabled = true, arm_rot_toggle_double_press_kb = false, arm_rot_toggle_double_press_pad = true, arm_rot_transition_in = 0.15, arm_rot_transition_out = 0.2, arm_rot_spring_k = 1000.0, arm_rot_spring_d = 20.0, arm_rot_wobble = true, arm_rot_wobble_in = true, arm_rot_wobble_amplitude = 0.04, arm_rot_wobble_frequency = 21.0, arm_rot_wobble_damping = 6.3, arm_rot_wobble_duration = 1.6 }
+local prefs = { hide_reticle = true, bullet_from_muzzle = true, muzzle_all_views = false, transition_in = 0.15, transition_out = 1.0, transition_swap = 0.5, standard_fps_mode = false, zero_min_fit_rate = false, sfps_disable_ads_snipers = true, muzzle_disable_ads_snipers = true, auto_iron_sight = true, canted_aim_enabled = false, canted_aim_toggle_double_press_kb = false, canted_aim_toggle_double_press_pad = true, canted_aim_transition_in = 0.15, canted_aim_transition_out = 0.2, canted_aim_spring_k = 1000.0, canted_aim_spring_d = 20.0, canted_aim_wobble = true, canted_aim_wobble_in = true, canted_aim_wobble_amplitude = 0.04, canted_aim_wobble_frequency = 21.0, canted_aim_wobble_damping = 6.3, canted_aim_wobble_duration = 1.6, pose_ignore_canted = false, sfps_wobble_amplitude = 0.007, sfps_wobble_forward_amplitude = 0.007, sfps_wobble_frequency = 23.5, sfps_wobble_damping = 7.5, sfps_wobble_duration = 0.85 }
 do
     local saved = json.load_file(PREFS_PATH)
     if saved and type(saved) == "table" then
@@ -422,107 +497,44 @@ do
         if saved.transition_out ~= nil then prefs.transition_out = saved.transition_out end
         if saved.transition_swap ~= nil then prefs.transition_swap = saved.transition_swap end
         if saved.standard_fps_mode ~= nil then prefs.standard_fps_mode = saved.standard_fps_mode end
-        if saved.ha_hold_to_activate ~= nil then prefs.ha_hold_to_activate = saved.ha_hold_to_activate end
-        if saved.ha_breath_duration ~= nil then prefs.ha_breath_duration = saved.ha_breath_duration end
-        if saved.ha_apply_min_fit_rate ~= nil then prefs.ha_apply_min_fit_rate = saved.ha_apply_min_fit_rate end
+        if saved.sfps_wobble_amplitude ~= nil then prefs.sfps_wobble_amplitude = saved.sfps_wobble_amplitude end
+        if saved.sfps_wobble_forward_amplitude ~= nil then prefs.sfps_wobble_forward_amplitude = saved.sfps_wobble_forward_amplitude end
+        if saved.sfps_wobble_frequency ~= nil then prefs.sfps_wobble_frequency = saved.sfps_wobble_frequency end
+        if saved.sfps_wobble_damping ~= nil then prefs.sfps_wobble_damping = saved.sfps_wobble_damping end
+        if saved.sfps_wobble_duration ~= nil then prefs.sfps_wobble_duration = saved.sfps_wobble_duration end
+        -- Breath-hold prefs moved to re9holdbreath (its own prefs.json); it owns them now.
         if saved.zero_min_fit_rate ~= nil then prefs.zero_min_fit_rate = saved.zero_min_fit_rate end
-        if saved.perfect_focus ~= nil then prefs.perfect_focus = saved.perfect_focus end
         if saved.sfps_disable_ads_snipers ~= nil then prefs.sfps_disable_ads_snipers = saved.sfps_disable_ads_snipers end
         if saved.muzzle_disable_ads_snipers ~= nil then prefs.muzzle_disable_ads_snipers = saved.muzzle_disable_ads_snipers end
         if saved.auto_iron_sight ~= nil then prefs.auto_iron_sight = saved.auto_iron_sight end
-        if saved.arm_rotation_enabled ~= nil then prefs.arm_rotation_enabled = saved.arm_rotation_enabled end
-        if saved.arm_rot_toggle_double_press_kb ~= nil then prefs.arm_rot_toggle_double_press_kb = saved.arm_rot_toggle_double_press_kb end
-        if saved.arm_rot_toggle_double_press_pad ~= nil then prefs.arm_rot_toggle_double_press_pad = saved.arm_rot_toggle_double_press_pad end
-        if saved.arm_rot_transition_in ~= nil then prefs.arm_rot_transition_in = saved.arm_rot_transition_in end
-        if saved.arm_rot_transition_out ~= nil then prefs.arm_rot_transition_out = saved.arm_rot_transition_out end
-        if saved.arm_rot_spring_k ~= nil then prefs.arm_rot_spring_k = saved.arm_rot_spring_k end
-        if saved.arm_rot_spring_d ~= nil then prefs.arm_rot_spring_d = saved.arm_rot_spring_d end
-        if saved.arm_rot_wobble ~= nil then prefs.arm_rot_wobble = saved.arm_rot_wobble end
-        if saved.arm_rot_wobble_in ~= nil then prefs.arm_rot_wobble_in = saved.arm_rot_wobble_in end
-        if saved.arm_rot_wobble_amplitude ~= nil then prefs.arm_rot_wobble_amplitude = saved.arm_rot_wobble_amplitude end
-        if saved.arm_rot_wobble_frequency ~= nil then prefs.arm_rot_wobble_frequency = saved.arm_rot_wobble_frequency end
-        if saved.arm_rot_wobble_damping ~= nil then prefs.arm_rot_wobble_damping = saved.arm_rot_wobble_damping end
-        if saved.arm_rot_wobble_duration ~= nil then prefs.arm_rot_wobble_duration = saved.arm_rot_wobble_duration end
+        if saved.canted_aim_enabled ~= nil then prefs.canted_aim_enabled = saved.canted_aim_enabled end
+        if saved.pose_ignore_canted ~= nil then prefs.pose_ignore_canted = saved.pose_ignore_canted end
+        if saved.canted_aim_toggle_double_press_kb ~= nil then prefs.canted_aim_toggle_double_press_kb = saved.canted_aim_toggle_double_press_kb end
+        if saved.canted_aim_toggle_double_press_pad ~= nil then prefs.canted_aim_toggle_double_press_pad = saved.canted_aim_toggle_double_press_pad end
+        if saved.canted_aim_transition_in ~= nil then prefs.canted_aim_transition_in = saved.canted_aim_transition_in end
+        if saved.canted_aim_transition_out ~= nil then prefs.canted_aim_transition_out = saved.canted_aim_transition_out end
+        if saved.canted_aim_spring_k ~= nil then prefs.canted_aim_spring_k = saved.canted_aim_spring_k end
+        if saved.canted_aim_spring_d ~= nil then prefs.canted_aim_spring_d = saved.canted_aim_spring_d end
+        if saved.canted_aim_wobble ~= nil then prefs.canted_aim_wobble = saved.canted_aim_wobble end
+        if saved.canted_aim_wobble_in ~= nil then prefs.canted_aim_wobble_in = saved.canted_aim_wobble_in end
+        if saved.canted_aim_wobble_amplitude ~= nil then prefs.canted_aim_wobble_amplitude = saved.canted_aim_wobble_amplitude end
+        if saved.canted_aim_wobble_frequency ~= nil then prefs.canted_aim_wobble_frequency = saved.canted_aim_wobble_frequency end
+        if saved.canted_aim_wobble_damping ~= nil then prefs.canted_aim_wobble_damping = saved.canted_aim_wobble_damping end
+        if saved.canted_aim_wobble_duration ~= nil then prefs.canted_aim_wobble_duration = saved.canted_aim_wobble_duration end
     end
 end
 local function save_prefs()
     json.dump_file(PREFS_PATH, prefs)
 end
 
-local TYPE_PlayerEquipment = sdk.typeof("app.PlayerEquipment")
-local TYPE_CameraPosSetting = sdk.typeof("app.PlayerCameraPositionSetting")
-local TYPE_Cp_A000InputDriver = sdk.typeof("app.Cp_A000InputDriver")  -- Leon
-local TYPE_Cp_A100InputDriver = sdk.typeof("app.Cp_A100InputDriver")  -- Grace
+
+-- PlayerEquipment / CameraPosSetting / Cp_A*InputDriver types dropped: that state now comes
+-- from the shared re9holdbreath cache.
 local TYPE_Cp_A000Updater = sdk.typeof("app.Cp_A000Updater")
 local TYPE_Cp_A100Updater = sdk.typeof("app.Cp_A100Updater")
 local TYPE_PlayerFPSCameraController = sdk.typeof("app.PlayerFPSCameraController")
+local TYPE_BodyAddCtrlDriver = sdk.typeof("app.BodyAddCtrlDriver")
 
-local HOLD_ANIM_PATH = "IronSights/hold_anim.json"
-local HOLD_ANIM_DEFAULTS = {
-    arm0000 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.2 },
-    arm0001 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
-    arm0003 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.2 },
-    arm0004 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
-    arm0005 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
-    arm0006 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.1 },
-    arm0007 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.2 },
-    arm0100 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
-    arm0103 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.1 },
-    arm0104 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.1 },
-    arm0200 = { enabled = false },
-    arm0400_grace = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
-    arm0400_leon = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.1 },
-    arm0500 = { enabled = false, layers = {0,1}, ramp = 1.0, speed = 0.1 },
-    arm0501 = { enabled = false, layers = {0,1}, ramp = 2.0, speed = 0.2 },
-    arm0503 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.15 },
-    arm0505 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.15 },
-    arm0600 = { enabled = false, layers = {0,1}, ramp = 1.5, speed = 0.0 },
-    arm0601 = { enabled = false, layers = {0,1}, ramp = 2.5, speed = 0.0 },
-}
-local hold_anim_edits = {}
-do
-    for k, v in pairs(HOLD_ANIM_DEFAULTS) do
-        hold_anim_edits[k] = {}
-        for fk, fv in pairs(v) do hold_anim_edits[k][fk] = fv end
-    end
-    local saved = json.load_file(HOLD_ANIM_PATH)
-    if saved and type(saved) == "table" then
-        for k, v in pairs(saved) do
-            if type(v) == "table" then
-                if not hold_anim_edits[k] then hold_anim_edits[k] = {} end
-                for fk, fv in pairs(v) do hold_anim_edits[k][fk] = fv end
-            end
-        end
-    end
-end
-local function save_hold_anim() json.dump_file(HOLD_ANIM_PATH, hold_anim_edits) end
-
-local _ha = {}
-_ha.any_enabled = false
-local function refresh_any_hold_anim()
-    for _, edit in pairs(hold_anim_edits) do
-        if edit.enabled then _ha.any_enabled = true; return end
-    end
-    _ha.any_enabled = false
-end
-refresh_any_hold_anim()
-
-_ha.was_holding = false
-_ha.blend_weight = 0.0
-_ha.last_time = os.clock()
-_ha.active_start = nil
-_ha.breath_mfr_zeroed = false
-_ha.breath_pf_applied = false
-
-local function get_hold_anim_for_key(key)
-    local edit = key and hold_anim_edits[key]
-    if edit and edit.enabled then
-        local force = math.max(0, math.min(edit.force or 1.0, 10.0))
-        local speed = math.max(0, math.min(edit.speed or 0.1, 10.0))
-        return true, force, speed, edit.layers, edit.delay or 0, edit.ramp or 1.5
-    end
-    return false, 1.0, 0.1, nil, 0, 1.5
-end
 
 local _acs = {}
 _acs.TYPE_WCR = sdk.typeof("app.WeaponCatalogRegister")
@@ -828,6 +840,7 @@ function _acs.restore_point_range_all()
     end
 end
 
+
 re.on_pre_application_entry("LockScene", function()
     if _acs.applied then return end
     _acs.apply()
@@ -848,7 +861,7 @@ local function populate_ui(key, cover_state)
     if cover_state == "StandardFPS" then
         o = get_standard_fps_offset(key) or default_standard_fps_offsets[key] or default_standard_fps_offset
     elseif cover_state then
-        o = get_cover_offset(key, cover_state)
+        o = effective_cover_offset(key, cover_state)
     else
         o = weapon_offsets[key]
     end
@@ -866,8 +879,8 @@ end
 local TRANSITION_IN = prefs.transition_in
 local TRANSITION_OUT = prefs.transition_out
 local TRANSITION_SWAP = prefs.transition_swap
-local ARM_ROT_TRANSITION_IN = prefs.arm_rot_transition_in
-local ARM_ROT_TRANSITION_OUT = prefs.arm_rot_transition_out
+local CANTED_AIM_TRANSITION_IN = prefs.canted_aim_transition_in
+local CANTED_AIM_TRANSITION_OUT = prefs.canted_aim_transition_out
 
 local transition = {
     from_x = 0.0, from_y = 0.0, from_z = 0.0,
@@ -879,8 +892,33 @@ local transition = {
     last_time = os.clock(),
 }
 
-local function transition_set_target(tx, ty, tz, override_duration)
+-- Damped sine wobble on camera offset after Standard FPS mode toggle (same formula as canted aim).
+-- prefs.sfps_wobble_amplitude scales motion along the offset delta (UI: side-to-side); sfps_wobble_forward_amplitude adds Z-only term.
+local sfps_cam_wobble = {
+    active = false,
+    wobble_after_lerp = false,
+    start_time = 0.0,
+    settle_x = 0.0, settle_y = 0.0, settle_z = 0.0,
+    dir_x = 1.0, dir_y = 0.0, dir_z = 0.0,
+}
+
+local function transition_set_target(tx, ty, tz, override_duration, arm_sfps_wobble)
     if tx == transition.to_x and ty == transition.to_y and tz == transition.to_z then return end
+    sfps_cam_wobble.active = false
+    sfps_cam_wobble.wobble_after_lerp = false
+    if arm_sfps_wobble then
+        local dx = tx - transition.cur_x
+        local dy = ty - transition.cur_y
+        local dz = tz - transition.cur_z
+        local len_sq = dx * dx + dy * dy + dz * dz
+        if len_sq > 1e-12 then
+            local inv = 1.0 / math.sqrt(len_sq)
+            sfps_cam_wobble.dir_x = dx * inv
+            sfps_cam_wobble.dir_y = dy * inv
+            sfps_cam_wobble.dir_z = dz * inv
+            sfps_cam_wobble.wobble_after_lerp = true
+        end
+    end
     local was_zero = (transition.to_x == 0 and transition.to_y == 0 and transition.to_z == 0)
     local is_zero = (tx == 0 and ty == 0 and tz == 0)
     transition.from_x = transition.cur_x
@@ -907,16 +945,16 @@ local function smoothstep(t)
     return t * t * (3.0 - 2.0 * t)
 end
 
--- Damped spring for arm rotation blend: overshoot, wobble a bit, then settle (tunable via sliders)
-local ARM_ROT_SPRING_K = prefs.arm_rot_spring_k
-local ARM_ROT_SPRING_D = prefs.arm_rot_spring_d
-local ARM_ROT_BLEND_CLAMP_LO = -0.22
-local ARM_ROT_BLEND_CLAMP_HI = 1.22
-local ARM_ROT_SETTLE_THRESH = 0.002
-local ARM_ROT_VEL_THRESH = 0.015
+-- Damped spring for canted aim blend: overshoot, wobble a bit, then settle (tunable via sliders)
+local CANTED_AIM_SPRING_K = prefs.canted_aim_spring_k
+local CANTED_AIM_SPRING_D = prefs.canted_aim_spring_d
+local CANTED_AIM_BLEND_CLAMP_LO = -0.22
+local CANTED_AIM_BLEND_CLAMP_HI = 1.22
+local CANTED_AIM_SETTLE_THRESH = 0.002
+local CANTED_AIM_VEL_THRESH = 0.015
 -- Initial velocity when handing off to spring: smaller for transition-in so wobble into canted is gentler
-local ARM_ROT_WOBBLE_VEL_IN = 2.0
-local ARM_ROT_WOBBLE_VEL_OUT = 5.0
+local CANTED_AIM_WOBBLE_VEL_IN = 2.0
+local CANTED_AIM_WOBBLE_VEL_OUT = 5.0
 
 local function transition_update()
     local now = os.clock()
@@ -927,6 +965,18 @@ local function transition_update()
         transition.cur_x = transition.to_x
         transition.cur_y = transition.to_y
         transition.cur_z = transition.to_z
+        if sfps_cam_wobble.wobble_after_lerp then
+            sfps_cam_wobble.wobble_after_lerp = false
+            local amp0 = prefs.sfps_wobble_amplitude or 0.007
+            local amp_fwd0 = prefs.sfps_wobble_forward_amplitude or 0.007
+            if amp0 > 1e-8 or amp_fwd0 > 1e-8 then
+                sfps_cam_wobble.active = true
+                sfps_cam_wobble.start_time = now
+                sfps_cam_wobble.settle_x = transition.to_x
+                sfps_cam_wobble.settle_y = transition.to_y
+                sfps_cam_wobble.settle_z = transition.to_z
+            end
+        end
         return
     end
 
@@ -943,10 +993,35 @@ local function transition_update()
     transition.cur_z = transition.from_z + (transition.to_z - transition.from_z) * s
 end
 
+-- RE9Laser publishes this while its master Enabled gate is on (for EVERY laser style, Vanilla
+-- included). When it's active, RE9Laser owns bullet spawn entirely — its bundled muzzle fix
+-- rewrites the shell transform — so we run NONE of our own muzzle-spawn code and let it decide,
+-- rather than both mods rewriting the same shell transform. It also owns the reticle: our
+-- reticle hiding would take the laser dot down with it (the dot draws through Gui_ui2020), so
+-- while the laser is active we never hide and the two options are removed from the menu.
+-- Checked at runtime (not load) since script load order isn't guaranteed.
+local function re9_laser_active()
+    return rawget(_G, "RE9Laser_Active") == true
+end
+
 -- Reticle hiding
 local hide_reticle = prefs.hide_reticle
 local cached_view_mode = -1
+local cached_body_view_mode = -1
+local PLAYER_MODE_FPS = 1
+local PLAYER_MODE_TPS = 0
 local cached_game_paused = false
+
+local function is_tps_view()
+    if cached_body_view_mode == PLAYER_MODE_TPS then return true end
+    if cached_view_mode == PLAYER_MODE_TPS then return true end
+    return cached_view_mode >= 0 and cached_view_mode ~= PLAYER_MODE_FPS
+end
+
+local function is_fps_view()
+    return cached_view_mode == PLAYER_MODE_FPS
+end
+
 
 local reticle_names = {
     "Gui_ui2020"
@@ -956,6 +1031,14 @@ for i, v in ipairs(reticle_names) do
 end
 
 re.on_pre_gui_draw_element(function(element, context)
+    -- RE9Laser active: never veto the reticle draw. Its laser dot renders through the same
+    -- Gui_ui2020 element, so hiding the reticle would hide the dot too.
+    if re9_laser_active() then return true end
+    -- Scope overlay up (M4A1's ACOG): the optic IS the sight picture, and the crosshair drawn
+    -- inside it is the game's own - so iron-sight mode must not take it away. Whether the
+    -- crosshair belongs there at all is that mod's call (it has its own hide option); this only
+    -- stops a second, independent hide fighting it. Published every frame, false when absent.
+    if _G.M4A1_ScopeOverlayVisible == true then return true end
     if not hide_reticle then return true end
     if cached_view_mode ~= 1 then return true end
     local game_object = element:call("get_GameObject")
@@ -969,61 +1052,24 @@ end)
 
 -- Bullet from muzzle
 local bullet_from_muzzle = prefs.bullet_from_muzzle
-local muzzle = {
-    joint = nil,
-    cached_gun_go = nil,
-    pos = nil,
-    rot = nil,
-    debug_joint_name = "none",
-    debug_all_joints = ""
-}
 
-local MUZZLE_JOINT_CANDIDATES = {
-    "MuzzleAttach_Pos_00",
-    "muzzle",
-    "Muzzle",
-    "MuzzleJoint",
-    "vfx_muzzle1",
-    "vfx_muzzle",
-    "ef_muzzle",
-    "Muzzle_Pos",
-    "MuzzlePos",
-    "gun_muzzle",
-    "barrel_end",
-}
+-- RE93DCrosshair sets this global when installed. While it is present we force bullet-from-
+-- muzzle on so shots line up with its world-space crosshair. Checked at runtime (not load)
+-- because script load order isn't guaranteed.
+local function re9_3d_crosshair_active()
+    return rawget(_G, "__re93dcrosshair_installed") == true
+end
+-- Shared muzzle bullet-spawn module (bundled under muzzlebulletspawn/). ALL muzzle-spawn logic
+-- lives there now — the same file RE9Laser uses — so this mod no longer carries its own copy of
+-- the muzzle-joint lookup + shell-transform rewrite; it just drives the module's enable (see the
+-- UpdateBehavior below). require caches by path, so if RE9Laser is also loaded both share ONE
+-- module instance and one set of hooks.
+local muzzlefix = require("muzzlebulletspawn/muzzlebulletspawn")
 
 local function muzzle_safe_call(obj, method, ...)
     if not obj then return nil end
     local ok, result = pcall(obj.call, obj, method, ...)
     return ok and result or nil
-end
-
-local function find_muzzle_joint(gun_xf)
-    for _, name in ipairs(MUZZLE_JOINT_CANDIDATES) do
-        local j = muzzle_safe_call(gun_xf, "getJointByName", name)
-        if j then
-            muzzle.debug_joint_name = name
-            return j
-        end
-    end
-
-    -- Fallback: scan all joints for any containing "muzzle"
-    local joint_count = muzzle_safe_call(gun_xf, "get_JointCount") or 0
-    local names = {}
-    for i = 0, joint_count - 1 do
-        local j = muzzle_safe_call(gun_xf, "getJointByIndex", i)
-        if j then
-            local jname = muzzle_safe_call(j, "get_Name") or ""
-            table.insert(names, jname)
-            if jname:lower():find("muzzle") or jname:lower():find("barrel") then
-                muzzle.debug_joint_name = jname .. " (scan)"
-                return j
-            end
-        end
-    end
-    muzzle.debug_all_joints = table.concat(names, ", ")
-    muzzle.debug_joint_name = "NOT FOUND"
-    return nil
 end
 
 -- Arm hand and arm lower joints: cache and resolve from player character
@@ -1053,12 +1099,91 @@ local function find_transform_with_joint(xform, joint_name)
     return nil
 end
 
+-- Hand/finger joints: everything that descends from R_Arm_Hand / L_Arm_Hand in the skeleton.
+-- Discovered by walking the transform's whole joint array once per player spawn (same cache
+-- lifetime as the six arm joints above) instead of hardcoding a name list, so this still finds
+-- the fingers on a swapped-in weapon/arm model.
+local finger_joints = { r = {}, l = {} }  -- ordered { name = , joint = } per side, sorted by name
+local finger_joint_by_name = {}
+local finger_joints_generation = 0  -- bumped per scan; the apply list recompiles off this
+local FINGER_PARENT_WALK_MAX = 8
+
+local function collect_finger_joints(xform_r, xform_l)
+    finger_joints.r = {}
+    finger_joints.l = {}
+    finger_joint_by_name = {}
+    finger_joints_generation = finger_joints_generation + 1
+
+    local by_name, parent_of, order = {}, {}, {}
+
+    local function scan(xform)
+        if not xform then return end
+        local arr = muzzle_safe_call(xform, "get_Joints")
+        if not arr then return end
+        local list
+        local ok_e, elems = pcall(arr.get_elements, arr)
+        if ok_e and type(elems) == "table" then
+            list = elems
+        else
+            list = {}
+            local ok_n, n = pcall(arr.get_size, arr)
+            if not ok_n or type(n) ~= "number" then return end
+            for i = 0, n - 1 do
+                local ok_j, j = pcall(arr.get_element, arr, i)
+                if ok_j and j then list[#list + 1] = j end
+            end
+        end
+        -- One get_Parent per joint here; the ancestry walk below is then pure string lookups
+        for i = 1, #list do
+            local j = list[i]
+            local name = muzzle_safe_call(j, "get_Name")
+            if type(name) == "string" and name ~= "" and not by_name[name] then
+                by_name[name] = j
+                order[#order + 1] = name
+                local p = muzzle_safe_call(j, "get_Parent")
+                local pname = p and muzzle_safe_call(p, "get_Name")
+                if type(pname) == "string" and pname ~= "" then parent_of[name] = pname end
+            end
+        end
+    end
+
+    scan(xform_r)
+    scan(xform_l)
+
+    for i = 1, #order do
+        local name = order[i]
+        local cur, depth = parent_of[name], 0
+        while cur and depth < FINGER_PARENT_WALK_MAX do
+            local side = (cur == "R_Arm_Hand" and finger_joints.r)
+                or (cur == "L_Arm_Hand" and finger_joints.l)
+            if side then
+                side[#side + 1] = { name = name, joint = by_name[name] }
+                finger_joint_by_name[name] = by_name[name]
+                break
+            end
+            cur = parent_of[cur]
+            depth = depth + 1
+        end
+    end
+
+    local function by_joint_name(a, b) return a.name < b.name end
+    table.sort(finger_joints.r, by_joint_name)
+    table.sort(finger_joints.l, by_joint_name)
+end
+
 local arm_hand_last_resolve_time = 0
 local ARM_HAND_RESOLVE_INTERVAL = 0.2  -- only re-resolve when cache valid every 0.2s to cut SDK calls
 
+local arm_hand_resolved_view_mode = -1
+
 local function resolve_arm_hand_joints()
     local now = os.clock()
-    if arm_hand_cached_player_go and (now - arm_hand_last_resolve_time) < ARM_HAND_RESOLVE_INTERVAL then
+    -- First and third person can be driven by different models, so a view flip has to re-scan
+    -- (the player GameObject compare below would not catch it on its own).
+    if cached_view_mode ~= arm_hand_resolved_view_mode then
+        arm_hand_resolved_view_mode = cached_view_mode
+        arm_hand_cached_player_go = nil
+    elseif arm_hand_cached_player_go and (now - arm_hand_last_resolve_time) < ARM_HAND_RESOLVE_INTERVAL then
         return  -- cache valid and not stale: skip SDK calls this frame
     end
     local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
@@ -1084,6 +1209,12 @@ local function resolve_arm_hand_joints()
             joints.l_arm_lower = find_transform_with_joint(xform, "L_Arm_Lower")
             joints.r_arm_upper = find_transform_with_joint(xform, "R_Arm_Upper")
             joints.l_arm_upper = find_transform_with_joint(xform, "L_Arm_Upper")
+            -- The hand joints can live on a child transform (find_transform_with_joint walks the
+            -- child chain), so scan from whichever transform actually owns them, not from xform.
+            collect_finger_joints(
+                joints.r_arm_hand and muzzle_safe_call(joints.r_arm_hand, "get_Owner") or nil,
+                joints.l_arm_hand and muzzle_safe_call(joints.l_arm_hand, "get_Owner") or nil
+            )
             if joints.r_arm_hand or joints.l_arm_hand or joints.r_arm_lower or joints.l_arm_lower or joints.r_arm_upper or joints.l_arm_upper then
                 arm_hand_cached_player_go = player_go
             end
@@ -1095,88 +1226,37 @@ end
 local _muzzle_ads_suppressed = false
 
 re.on_pre_application_entry("UpdateBehavior", function()
-    if not bullet_from_muzzle and not prefs.muzzle_all_views then return end
-    if not prefs.muzzle_all_views and cached_view_mode ~= 1 then return end
-
-    local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
-    if not char_mgr then return end
-    local ctx = muzzle_safe_call(char_mgr, "get_PlayerContextFast")
-    local updater = ctx and muzzle_safe_call(ctx, "get_Updater")
-    local arms = updater and muzzle_safe_call(updater, "get_EquipWeapon")
-    if not arms then return end
-
-    local td = arms:get_type_definition()
-    if not td or not td:is_a("app.PlayerGun") then return end
-
-    local gun_go = muzzle_safe_call(arms, "get_GameObject")
-    if not gun_go then return end
-
-    if gun_go ~= muzzle.cached_gun_go then
-        muzzle.joint = nil
-        muzzle.cached_gun_go = nil
-        muzzle.pos = nil
-        muzzle.rot = nil
-        muzzle.debug_all_joints = ""
-
-        local gun_xf = muzzle_safe_call(gun_go, "get_Transform")
-        if gun_xf then
-            muzzle.joint = find_muzzle_joint(gun_xf)
-            if muzzle.joint then
-                muzzle.cached_gun_go = gun_go
-            end
-        end
-    end
-
-    if muzzle.joint then
-        muzzle.pos = muzzle_safe_call(muzzle.joint, "get_Position")
-        muzzle.rot = muzzle_safe_call(muzzle.joint, "get_Rotation")
-    end
+    -- Drive the shared muzzle-fix module (muzzle spawn on, and first person unless "all views").
+    -- Runs its first half even while RE9Laser is active — the forced flag feeds the LockScene
+    -- publish — but only ONE mod ever calls set_enabled, so bail before it.
+    if re9_3d_crosshair_active() then bullet_from_muzzle = true end
+    local want = (bullet_from_muzzle or prefs.muzzle_all_views)
+        and (prefs.muzzle_all_views or cached_view_mode == 1)
+    if re9_laser_active() then return end
+    muzzlefix.set_enabled(want == true)
 end)
 
-do
-    local vec3_td = sdk.find_type_definition("via.vec3")
-    local quat_td = sdk.find_type_definition("via.Quaternion")
-    local pg_td = sdk.find_type_definition("app.PlayerGun")
-    if pg_td then
-        local m = pg_td:get_method("trySetupShellTransform")
-        if m then
-            sdk.hook(m,
-                function(args)
-                    if not bullet_from_muzzle and not prefs.muzzle_all_views then return end
-                    if not prefs.muzzle_all_views and cached_view_mode ~= 1 then return end
-                    if not muzzle.pos or not muzzle.rot then return end
-
-                    local pos_ptr = sdk.to_ptr(sdk.to_int64(args[3]))
-
-                    local pos_ptr = sdk.to_ptr(sdk.to_int64(args[3]))
-                    local rot_ptr = sdk.to_ptr(sdk.to_int64(args[4]))
-                    if not pos_ptr or not rot_ptr then return end
-
-                    sdk.set_native_field(pos_ptr, vec3_td, "x", muzzle.pos.x)
-                    sdk.set_native_field(pos_ptr, vec3_td, "y", muzzle.pos.y)
-                    sdk.set_native_field(pos_ptr, vec3_td, "z", muzzle.pos.z)
-
-                    sdk.set_native_field(rot_ptr, quat_td, "w", muzzle.rot.w)
-                    sdk.set_native_field(rot_ptr, quat_td, "x", muzzle.rot.x)
-                    sdk.set_native_field(rot_ptr, quat_td, "y", muzzle.rot.y)
-                    sdk.set_native_field(rot_ptr, quat_td, "z", muzzle.rot.z)
-
-                    return sdk.PreHookResult.SKIP_ORIGINAL
-                end,
-                function(retval) return retval end
-            )
-        end
-    end
-end
+-- (The PlayerGun.trySetupShellTransform shell-transform rewrite now lives in the shared
+-- muzzlebulletspawn module, driven by the enable above — no local hook here anymore.)
 
 local STANDARD_FPS_X = -0.09
 local TRANSITION_SFPS = 0.2
 local TRANSITION_ADS = 0.2
+-- Was the scope offset the target LAST frame? Raising or lowering an optic is an ADS move, but
+-- with standard-FPS mode on it runs between two NON-ZERO offsets, which the duration picker
+-- reads as a "swap" and gives TRANSITION_SWAP (0.5 s) -- two and a half times slower than an
+-- ordinary ADS blend, and very obvious with a large scope offset. Remembering the previous frame
+-- makes lowering the scope as quick as raising it, instead of only fixing one direction.
+local scope_offset_prev = false
 local standard_fps_mode = prefs.standard_fps_mode
-local arm_rotation_enabled = prefs.arm_rotation_enabled
-local sfps_toggled_this_frame = false
+local canted_aim_enabled = prefs.canted_aim_enabled
+-- Set when Standard FPS mode is toggled (hotkey or UI); consumed in LockScene for transition duration + wobble
+local pending_sfps_camera_event = false
 
 local function sync_auto_iron_sight()
+    -- RE9Laser owns the reticle while active; don't let auto mode force it hidden (that would
+    -- take the laser dot with it).
+    if re9_laser_active() then return end
     if not prefs.auto_iron_sight then return end
     if standard_fps_mode then
         hide_reticle = false
@@ -1189,12 +1269,13 @@ end
 sync_auto_iron_sight()
 
 local hk = require("Hotkeys/Hotkeys")
+local holdbreath = require("re9holdbreath/re9holdbreath")
 local IS_HK_PATH = "IronSights/hotkeys.json"
 local is_hk_default_settings = {
     use_modifier = false,
     use_pad_modifier = true,
-    use_arm_rot_modifier = false,
-    use_pad_arm_rot_modifier = true,
+    use_canted_aim_modifier = true,
+    use_pad_canted_aim_modifier = true,
     use_ha_modifier = false,
     use_pad_ha_modifier = true,
     hotkeys = {
@@ -1202,10 +1283,10 @@ local is_hk_default_settings = {
         ["Standard FPS Toggle"] = "EX0",
         ["Pad SFPS Modifier"] = "LT (L2)",
         ["Pad Standard FPS Toggle"] = "",
-        ["Arm Rotation Modifier"] = "R Mouse",
-        ["Arm Rotation Toggle"] = "EX1",
-        ["Pad Arm Rotation Modifier"] = "LT (L2)",
-        ["Pad Arm Rotation Toggle"] = "L3",
+        ["Canted Aim Modifier"] = "R Mouse",
+        ["Canted Aim Toggle"] = "Alt",
+        ["Pad Canted Aim Modifier"] = "LT (L2)",
+        ["Pad Canted Aim Toggle"] = "L3",
         ["HA Modifier"] = "",
         ["Hold Animation Toggle"] = "T",
         ["Pad HA Modifier"] = "LT (L2)",
@@ -1215,15 +1296,15 @@ local is_hk_default_settings = {
 local is_hk_settings = hk.recurse_def_settings(json.load_file(IS_HK_PATH) or {}, is_hk_default_settings)
 hk.setup_hotkeys(is_hk_settings.hotkeys, is_hk_default_settings.hotkeys)
 
-local ARM_ROT_DOUBLECLICK_WINDOW = 0.4
-local arm_rot_state = {
+local CANTED_AIM_DOUBLECLICK_WINDOW = 0.4
+local canted_aim_state = {
     toggle_was_down_kb = false,
     toggle_was_down_pad = false,
     last_press_time_kb = 0,
     last_press_time_pad = 0,
-    blend = arm_rotation_enabled and 1.0 or 0.0,
+    blend = canted_aim_enabled and 1.0 or 0.0,
     velocity = 0.0,
-    prev_target = arm_rotation_enabled and 1.0 or 0.0,
+    prev_target = canted_aim_enabled and 1.0 or 0.0,
     in_transition = false,
     transition_start_time = 0.0,
     transition_start_blend = 0.0,
@@ -1239,55 +1320,84 @@ re.on_application_entry("UpdateBehavior", function()
     local kb = (not is_hk_settings.use_modifier or hk.check_hotkey("SFPS Modifier", true)) and hk.check_hotkey("Standard FPS Toggle", true)
     local pad = (not is_hk_settings.use_pad_modifier or hk.check_hotkey("Pad SFPS Modifier", true)) and hk.check_hotkey("Pad Standard FPS Toggle", true)
     local is_down = kb or pad
-    sfps_toggled_this_frame = false
+    -- PRESS COUNTER for other mods, on the raw EDGE of the IRON SIGHT hotkey
+    -- (Standard FPS Toggle - modifier + key, e.g. L2 + Circle on a pad). A
+    -- counter and not a state: M4A1 toggles its third-person scope overlay from
+    -- this, and over the shoulder no pose STATE changes at all, so a press is
+    -- the only signal that exists there. Published before the toggle body, so it
+    -- counts the press itself rather than what the press did with it.
     if is_down and not sfps_toggle_was_down then
+        _G.IronSights_IronPress = (rawget(_G, "IronSights_IronPress") or 0) + 1
         standard_fps_mode = not standard_fps_mode
         prefs.standard_fps_mode = standard_fps_mode
         save_prefs()
-        sfps_toggled_this_frame = true
+        pending_sfps_camera_event = true
         sync_auto_iron_sight()
     end
     sfps_toggle_was_down = is_down or false
 
-    local ar_kb = (not is_hk_settings.use_arm_rot_modifier or hk.check_hotkey("Arm Rotation Modifier", true)) and hk.check_hotkey("Arm Rotation Toggle", true)
-    local ar_pad = (not is_hk_settings.use_pad_arm_rot_modifier or hk.check_hotkey("Pad Arm Rotation Modifier", true)) and hk.check_hotkey("Pad Arm Rotation Toggle", true)
+    local ar_kb = (not is_hk_settings.use_canted_aim_modifier or hk.check_hotkey("Canted Aim Modifier", true)) and hk.check_hotkey("Canted Aim Toggle", true)
+    local ar_pad = (not is_hk_settings.use_pad_canted_aim_modifier or hk.check_hotkey("Pad Canted Aim Modifier", true)) and hk.check_hotkey("Pad Canted Aim Toggle", true)
     local now = os.clock()
-    if ar_kb and not arm_rot_state.toggle_was_down_kb then
-        if prefs.arm_rot_toggle_double_press_kb then
-            if arm_rot_state.last_press_time_kb > 0 and (now - arm_rot_state.last_press_time_kb) <= ARM_ROT_DOUBLECLICK_WINDOW then
-                arm_rotation_enabled = not arm_rotation_enabled
-                prefs.arm_rotation_enabled = arm_rotation_enabled
+    if ar_kb and not canted_aim_state.toggle_was_down_kb then
+        if prefs.canted_aim_toggle_double_press_kb then
+            -- Both taps of the double press are handed to re9holdbreath as an engage
+            -- deferral. The same key commonly carries the breath hold as well, and
+            -- there each tap would engage the hold and its release tear the pinned
+            -- frames down again, mid canted-swing — the judder. The module no-ops this
+            -- unless the bindings really do collide, and holding the key past the
+            -- window still engages the hold normally. See M.defer_engage.
+            if canted_aim_state.last_press_time_kb > 0 and (now - canted_aim_state.last_press_time_kb) <= CANTED_AIM_DOUBLECLICK_WINDOW then
+                canted_aim_enabled = not canted_aim_enabled
+                prefs.canted_aim_enabled = canted_aim_enabled
                 save_prefs()
-                arm_rot_state.last_press_time_kb = 0
+                canted_aim_state.last_press_time_kb = 0
+                holdbreath.defer_engage(CANTED_AIM_DOUBLECLICK_WINDOW + 0.05)
             else
-                arm_rot_state.last_press_time_kb = now
+                canted_aim_state.last_press_time_kb = now
+                holdbreath.defer_engage(CANTED_AIM_DOUBLECLICK_WINDOW + 0.05)
             end
         else
-            arm_rotation_enabled = not arm_rotation_enabled
-            prefs.arm_rotation_enabled = arm_rotation_enabled
+            canted_aim_enabled = not canted_aim_enabled
+            prefs.canted_aim_enabled = canted_aim_enabled
             save_prefs()
-            arm_rot_state.last_press_time_kb = 0
+            canted_aim_state.last_press_time_kb = 0
         end
     end
-    if ar_pad and not arm_rot_state.toggle_was_down_pad then
-        if prefs.arm_rot_toggle_double_press_pad then
-            if arm_rot_state.last_press_time_pad > 0 and (now - arm_rot_state.last_press_time_pad) <= ARM_ROT_DOUBLECLICK_WINDOW then
-                arm_rotation_enabled = not arm_rotation_enabled
-                prefs.arm_rotation_enabled = arm_rotation_enabled
+    if ar_pad and not canted_aim_state.toggle_was_down_pad then
+        if prefs.canted_aim_toggle_double_press_pad then
+            -- Same deferral as the KB path above.
+            if canted_aim_state.last_press_time_pad > 0 and (now - canted_aim_state.last_press_time_pad) <= CANTED_AIM_DOUBLECLICK_WINDOW then
+                canted_aim_enabled = not canted_aim_enabled
+                prefs.canted_aim_enabled = canted_aim_enabled
                 save_prefs()
-                arm_rot_state.last_press_time_pad = 0
+                canted_aim_state.last_press_time_pad = 0
+                holdbreath.defer_engage(CANTED_AIM_DOUBLECLICK_WINDOW + 0.05)
             else
-                arm_rot_state.last_press_time_pad = now
+                canted_aim_state.last_press_time_pad = now
+                holdbreath.defer_engage(CANTED_AIM_DOUBLECLICK_WINDOW + 0.05)
             end
         else
-            arm_rotation_enabled = not arm_rotation_enabled
-            prefs.arm_rotation_enabled = arm_rotation_enabled
+            canted_aim_enabled = not canted_aim_enabled
+            prefs.canted_aim_enabled = canted_aim_enabled
             save_prefs()
-            arm_rot_state.last_press_time_pad = 0
+            canted_aim_state.last_press_time_pad = 0
         end
     end
-    arm_rot_state.toggle_was_down_kb = ar_kb or false
-    arm_rot_state.toggle_was_down_pad = ar_pad or false
+    canted_aim_state.toggle_was_down_kb = ar_kb or false
+    canted_aim_state.toggle_was_down_pad = ar_pad or false
+
+    -- Published for RE9Laser (which owns the reticle GUI while active): hide it while the FP
+    -- camera is down the real sights — iron-sight mode, canted off. Unread when RE9Laser is
+    -- absent; our own hide_reticle veto covers the standalone case.
+    --
+    -- A scope picture (M4A1's ACOG overlay) cancels it: the eye is down an OPTIC, not the iron
+    -- sights, so the reticle is not redundant there. This matters beyond the crosshair — the
+    -- laser DOT draws through that same element, so hiding it took the whole laser with it.
+    _G.IronSights_HideGui = (cached_view_mode == 1)
+        and (not standard_fps_mode)
+        and (not canted_aim_enabled)
+        and (_G.M4A1_ScopeOverlayVisible ~= true)
 end)
 
 local camera_offset_applied = false
@@ -1297,7 +1407,8 @@ local cached = {
     is_holding = false,
     fps_state = nil,
     busy_ads = false,
-    is_hold_end_request = false
+    is_hold_end_request = false,
+    fire_active = false,
 }
 
 -- Blend (0..1) for applying canted offset; when hold flag is false we decay this so offset interpolates to zero instead of snapping
@@ -1316,21 +1427,7 @@ local function get_player_context()
     return nil
 end
 
-local function get_equipped_weapon_id_from_ctx(ctx)
-    if not ctx or not TYPE_PlayerEquipment then return nil end
-    local ok_go, go = pcall(ctx.call, ctx, "get_GameObject")
-    if not ok_go or not go then return nil end
-    local ok_pe, pe = pcall(go.call, go, "getComponent(System.Type)", TYPE_PlayerEquipment)
-    if not ok_pe or not pe then return nil end
-    local ok_eid, eid = pcall(pe.get_field, pe, "<EquipWeaponID>k__BackingField")
-    if not ok_eid or not eid then return nil end
-    local ok_s, eid_str = pcall(eid.call, eid, "ToString()")
-    if not ok_s or not eid_str then
-        local ok_v, val = pcall(eid.get_field, eid, "value__")
-        if ok_v and val then eid_str = tostring(val) end
-    end
-    return eid_str
-end
+-- (weapon-id resolution from a context lives in re9holdbreath now; we read its cache.)
 
 local SHARED_WEAPONS = { ["arm0400"] = true }
 
@@ -1414,80 +1511,30 @@ local function refresh_cached_game_paused()
 end
 
 re.on_pre_application_entry("LockScene", function()
-    local ctx = get_player_context()
-    if ctx then
-        local ok_vm, view_mode = pcall(ctx.get_field, ctx, "<CurrentViewMode>k__BackingField")
-        cached_view_mode = (ok_vm and tonumber(view_mode)) or -1
+    -- Player / weapon / view / ADS state comes from the shared re9holdbreath cache. That module
+    -- is a require-cached singleton which already resolves this exact set once per frame, and its
+    -- own pre-LockScene hook registered before this one (we require it above), so these are
+    -- same-frame values -- this just stops us walking
+    -- CharacterManager -> PlayerContext -> GameObject -> getComponent a second time every frame.
+    -- Key semantics are identical: it applies the same get_offset_key/SHARED_WEAPONS rule.
+    local s = holdbreath.get_state()
+    cached_view_mode           = holdbreath.view_mode()
+    cached_body_view_mode      = holdbreath.body_view_mode()
+    cached.character           = s.character
+    cached.weapon_id           = s.weapon_id
+    cached.is_holding          = s.is_holding == true
+    cached.fps_state           = s.fps_state
+    cached.busy_ads            = s.busy_ads == true
+    cached.is_hold_end_request = s.is_hold_end_request == true
+    cached.fire_active         = s.fire_active == true
+    if not holdbreath.has_player() then cached_game_paused = false end
 
-        local ok_il, is_leon = pcall(ctx.call, ctx, "get_IsCp_A0Character")
-        cached.character = (ok_il and is_leon) and "leon" or "grace"
 
-        local raw_id = get_equipped_weapon_id_from_ctx(ctx)
-        cached.weapon_id = get_offset_key(raw_id, cached.character)
-
-        cached.is_hold_end_request = false
-        local ok_go, go = pcall(ctx.call, ctx, "get_GameObject")
-        if ok_go and go then
-            local input_driver_type = (cached.character == "leon") and TYPE_Cp_A000InputDriver or TYPE_Cp_A100InputDriver
-            if input_driver_type then
-                local ok_drv, driver = pcall(go.call, go, "getComponent(System.Type)", input_driver_type)
-                if ok_drv and driver then
-                    local ok_req, val = pcall(driver.get_field, driver, "<IsHoldEndRequest>k__BackingField")
-                    cached.is_hold_end_request = ok_req and val == true
-                end
-            end
-        else
-            cached_game_paused = false
-        end
-
-        cached.is_holding = false
-        if TYPE_CameraPosSetting and go then
-            if ok_go and go then
-                local ok_cps, cps = pcall(go.call, go, "getComponent(System.Type)", TYPE_CameraPosSetting)
-                if ok_cps and cps then
-                    local ok_h, hold = pcall(cps.get_field, cps, "_IsHold")
-                    cached.is_holding = ok_h and hold == true
-
-                    cached.fps_state = nil
-                    local ok_sf, state_fps = pcall(cps.get_field, cps, "_StateFPS")
-                    if ok_sf and state_fps then
-                        local ok_sv, state_val = pcall(state_fps.get_field, state_fps, "<State>k__BackingField")
-                        if ok_sv and state_val ~= nil then
-                            local ok_n, name = pcall(state_val.call, state_val, "ToString()")
-                            if ok_n and name then
-                                cached.fps_state = name
-                            else
-                                local ok_v, val = pcall(state_val.get_field, state_val, "value__")
-                                if ok_v then cached.fps_state = val end
-                            end
-                        end
-                    end
-
-                    cached.busy_ads = false
-                    local ok_bl, blender = pcall(cps.get_field, cps, "_CameraBlender")
-                    if ok_bl and blender then
-                        local ok_bt, bct = pcall(blender.get_field, blender, "<BusyCameraType>k__BackingField")
-                        if ok_bt and bct then
-                            local ok_bn, bct_name = pcall(bct.call, bct, "ToString()")
-                            cached.busy_ads = ok_bn and (bct_name == "ADS")
-                        end
-                    end
-                end
-            end
-        end
-    else
-        cached_view_mode = -1
-        cached.weapon_id = nil
-        cached.character = nil
-        cached.is_holding = false
-        cached.fps_state = nil
-        cached.busy_ads = false
-        cached.is_hold_end_request = false
-        cached_game_paused = false
-    end
-
-    if prefs.muzzle_disable_ads_snipers and cached.busy_ads
-        and (cached.weapon_id == "arm0600" or cached.weapon_id == "arm0601") then
+    -- Scoped check comes from re9holdbreath (shared with RE9 Laser and muzzlebulletspawn). This
+    -- used to read cached.busy_ads directly, which is transition-only: it suppressed on the way
+    -- into the scope and then restored as soon as the blend settled, i.e. while you were actually
+    -- aiming through it. The shared rule also covers the blend back out on release.
+    if prefs.muzzle_disable_ads_snipers and holdbreath.is_scoped() then
         if not _muzzle_ads_suppressed then
             bullet_from_muzzle = false
             _muzzle_ads_suppressed = true
@@ -1503,12 +1550,102 @@ re.on_pre_application_entry("LockScene", function()
         return
     end
 
+    local arm_sfps_transition = pending_sfps_camera_event
+    pending_sfps_camera_event = false
+
     local is_cover = COVER_STATE_TO_KEY[cached.fps_state] ~= nil
     local is_active = cached_view_mode == 1 and (cached.is_holding or is_cover)
+    -- Published for RE9Laser (which owns the shared muzzle module while active): force muzzle
+    -- spawn exactly while the iron sights are the aim — FP with the weapon up, not Standard FPS,
+    -- canted off (in those two the laser's own spawn rules decide again, matching the reticle
+    -- rule above). Decided here, off the same condition that applies the camera offsets.
+    -- bullet_from_muzzle still carries this mod's own policy on top.
+    _G.IronSights_MuzzleSpawn = (is_active and not standard_fps_mode
+        and not canted_aim_enabled
+        and (bullet_from_muzzle or prefs.muzzle_all_views)) == true
+
+    -- Pose state for mods that draw against the weapon (M4A1's scope overlay
+    -- hides itself through these transitions rather than riding the swing).
+    -- Same publish convention as IronSights_MuzzleSpawn above.
+    _G.IronSights_PoseState = {
+        canted   = canted_aim_enabled == true,
+        sfps     = standard_fps_mode == true,
+        -- the main blend only. The overshoot wobble that follows it runs for
+        -- canted_aim_wobble_duration (1.6 s by default) and is cosmetic - the
+        -- weapon is already in its new pose, so waiting it out just makes
+        -- anything gated on this feel sluggish.
+        settling = canted_aim_state.in_transition == true,
+        wobbling = canted_aim_state.overshoot_active == true,
+    }
     local o = nil
+    local scope_offset_now = false
     if is_active and not cached.busy_ads and cached.weapon_id then
-        if is_cover then
+        -- M4A1's ACOG, checked FIRST because it is the most specific state. With the optic's
+        -- sight picture up the eye is down a scope, so neither the iron-sight figure nor a cover
+        -- pose describes the alignment. That mod owns both the flag and the values (its own menu
+        -- edits them, under "Scope aim offset"); this only applies them. Absent mod, absent
+        -- scope, or a malformed table all fall through to the normal path untouched.
+        --
+        -- Gated on arm0503 as well as the flag: the M4A1 replaces that weapon, and this offset is
+        -- tuned for its optic alone — it must never reach another gun. Prefix-matched because
+        -- this mod already keys per-character variants like arm0400_leon / arm0400_grace.
+        -- FITTED, not "overlay currently visible". The optic's picture fades up partway through
+        -- the raise, so keying on it moved the camera target mid-transition: the eye set off
+        -- toward the iron-sight offset, then redirected to the scope one. That redirect is the
+        -- flicker. Fitted holds for the whole move. Falls back to the visibility flag so an
+        -- older M4A1 that does not publish the new one still works.
+        if (_G.M4A1_ScopeFitted == true or _G.M4A1_ScopeOverlayVisible == true)
+            and cached.weapon_id:sub(1, 7) == "arm0503" then
+            local so = nil
+            -- Leaning around cover moves the body, so the optic wants its own eye
+            -- position there rather than the standing one. Keyed by OUR cover names,
+            -- so the crouch states collapse onto the same pair the weapon table uses.
+            -- Still the scope path, not the cover path below: an older M4A1 that does
+            -- not publish these, or a malformed table, falls back to the plain scope
+            -- offset and behaves exactly as before.
+            if is_cover then
+                so = _G.M4A1_ScopeCoverOffset
+                so = type(so) == "table" and so[COVER_STATE_TO_KEY[cached.fps_state]] or nil
+            end
+            so = so or _G.M4A1_ScopeAimOffset
+            if type(so) == "table" and type(so.x) == "number"
+                and type(so.y) == "number" and type(so.z) == "number" then
+                o = so
+                scope_offset_now = true
+            end
+        end
+        -- M4A1's IRON cover pair, checked BEFORE the generic cover table below. That mod
+        -- replaces arm0503, so it owns this weapon's alignment in every pose - the same
+        -- argument the plain iron offset further down already makes. It has to sit ABOVE
+        -- the lookup, not below: stale arm0503 rows exist in saved cover files (the M4A1
+        -- was tuned through this mod's own cover menu before it had its own pair), and a
+        -- row saved for one lean direction and not the other made that direction ignore
+        -- the M4A1's slider while the other obeyed it.
+        if not o and is_cover and cached.weapon_id:sub(1, 7) == "arm0503" then
+            local ic = _G.M4A1_IronCoverOffset
+            ic = type(ic) == "table" and ic[COVER_STATE_TO_KEY[cached.fps_state]] or nil
+            if type(ic) == "table" and type(ic.x) == "number"
+                and type(ic.y) == "number" and type(ic.z) == "number" then
+                o = ic
+            end
+        end
+        if not o and is_cover then
             o = get_cover_offset(cached.weapon_id, COVER_STATE_TO_KEY[cached.fps_state])
+        end
+        -- M4A1's IRON sight offset, the counterpart to the scope one above and used when its
+        -- ACOG is off. It stands in for this mod's own arm0503 figure — that weapon is the M4A1,
+        -- so the mod that knows what its sights look like owns the alignment, and both of its
+        -- sight pictures can be tuned from one menu. Checked AFTER cover, unlike the scope
+        -- offset: a cover pose is about where the body is, which the sight picture does not
+        -- change. Every other weapon, and an absent mod, keep the normal path.
+        if not o and cached.weapon_id:sub(1, 7) == "arm0503" then
+            -- Standing irons. The cover poses were already handled above, so this is
+            -- only reached out of cover, or when that pair is missing/malformed.
+            local io_ = _G.M4A1_IronAimOffset
+            if type(io_) == "table" and type(io_.x) == "number"
+                and type(io_.y) == "number" and type(io_.z) == "number" then
+                o = io_
+            end
         end
         if not o then
             o = weapon_offsets[cached.weapon_id]
@@ -1534,13 +1671,42 @@ re.on_pre_application_entry("LockScene", function()
     end
 
     local override_dur = nil
-    if sfps_toggled_this_frame then
+    if arm_sfps_transition then
         override_dur = TRANSITION_SFPS
+    elseif scope_offset_now or scope_offset_prev then
+        -- Raising or lowering the optic: an ADS move, so give it the ADS duration rather than
+        -- letting it fall through to the slower swap blend. Either side of the edge counts, so
+        -- coming out of the scope is as quick as going in.
+        override_dur = TRANSITION_ADS
     elseif cached.busy_ads and not standard_fps_mode then
         override_dur = TRANSITION_ADS
     end
-    transition_set_target(tx, ty, tz, override_dur)
+    scope_offset_prev = scope_offset_now
+    transition_set_target(tx, ty, tz, override_dur, arm_sfps_transition)
     transition_update()
+    if sfps_cam_wobble.active then
+        local wnow = os.clock()
+        local elapsed = wnow - sfps_cam_wobble.start_time
+        local wdur = math.max(0.01, prefs.sfps_wobble_duration or 0.85)
+        if elapsed >= wdur then
+            sfps_cam_wobble.active = false
+            transition.cur_x = sfps_cam_wobble.settle_x
+            transition.cur_y = sfps_cam_wobble.settle_y
+            transition.cur_z = sfps_cam_wobble.settle_z
+        else
+            local amp = prefs.sfps_wobble_amplitude or 0.007
+            local amp_fwd = prefs.sfps_wobble_forward_amplitude or 0.007
+            local freq = prefs.sfps_wobble_frequency or 23.5
+            local damp = prefs.sfps_wobble_damping or 7.5
+            local env = math.exp(-damp * elapsed)
+            local w = amp * env * math.sin(freq * elapsed)
+            -- Extra oscillation on offset Z only; same phase as side-to-side term so displacement is 0 at wobble start (no Z jump)
+            local w_z = amp_fwd * env * math.sin(freq * elapsed)
+            transition.cur_x = sfps_cam_wobble.settle_x + w * sfps_cam_wobble.dir_x
+            transition.cur_y = sfps_cam_wobble.settle_y + w * sfps_cam_wobble.dir_y
+            transition.cur_z = sfps_cam_wobble.settle_z + w * sfps_cam_wobble.dir_z + w_z
+        end
+    end
 
     local ox = transition.cur_x
     local oy = transition.cur_y
@@ -1577,288 +1743,11 @@ re.on_pre_application_entry("LockScene", function()
         1.0
     ))
     camera_offset_applied = true
+
 end)
 
-_ha.hold_start = nil
-
-_ha.motion_type = sdk.typeof("via.motion.Motion")
-
--- Cache method objects for motion layer set calls (avoid string lookup per frame)
-_ha.layer_td = sdk.find_type_definition("via.motion.Layer")
-_ha.meth_set_blend = _ha.layer_td and _ha.layer_td:get_method("set_BlendRate")
-_ha.meth_set_speed = _ha.layer_td and _ha.layer_td:get_method("set_Speed")
-
-local function get_player_motion_is()
-    local char_mgr = sdk.get_managed_singleton("app.CharacterManager")
-    if not char_mgr then return nil end
-    local ok1, ctx = pcall(char_mgr.call, char_mgr, "get_PlayerContextFast")
-    if not ok1 or not ctx then return nil end
-    local ok2, go = pcall(ctx.call, ctx, "get_GameObject")
-    if not ok2 or not go then return nil end
-    local ok3, motion = pcall(go.call, go, "getComponent(System.Type)", _ha.motion_type)
-    if not ok3 then return nil end
-    return motion
-end
-
-local function get_all_motion_layers_is()
-    local motion = get_player_motion_is()
-    if not motion then return {} end
-    local layers = {}
-    local ok_lc, lc = pcall(motion.call, motion, "getLayerCount")
-    if not ok_lc or not lc then return layers end
-    for i = 0, lc - 1 do
-        local ok_gl, tl = pcall(motion.call, motion, "getLayer", i)
-        if ok_gl and tl then
-            local ok_r, running = pcall(tl.call, tl, "get_Running")
-            local ok_e, empty = pcall(tl.call, tl, "get_TreeEmpty")
-            if ok_r and running and ok_e and not empty then
-                local name = ""
-                local ok_mn, mn = pcall(tl.call, tl, "get_HighestWeightMotionNode")
-                if ok_mn and mn then
-                    local ok_n, n = pcall(mn.call, mn, "get_MotionName")
-                    if ok_n and n then name = n end
-                end
-                layers[#layers + 1] = { idx = i, layer = tl, name = name }
-            end
-        end
-    end
-    return layers
-end
-
--- Cache motion layers for hold-anim to avoid get_all_motion_layers_is() every frame (frametime spike)
-_ha.layers_cache = nil
-_ha.layers_cache_time = 0
-_ha.layers_cache_weapon = nil
-_ha.LAYERS_CACHE_INTERVAL = 0.15
-
--- True if any motion layer is currently playing a recoil/fire-like clip (so we delay hold-breath blend until it finishes)
-local function is_recoil_animation_playing()
-    local motion = get_player_motion_is()
-    if not motion then return false end
-    local ok_lc, lc = pcall(motion.call, motion, "getLayerCount")
-    if not ok_lc or not lc then return false end
-    for i = 0, lc - 1 do
-        local ok_gl, tl = pcall(motion.call, motion, "getLayer", i)
-        if ok_gl and tl then
-            local ok_r, running = pcall(tl.call, tl, "get_Running")
-            if not (ok_r and running) then goto continue end
-            local ok_e, empty = pcall(tl.call, tl, "get_TreeEmpty")
-            if ok_e and empty then goto continue end
-            local ok_mn, mn = pcall(tl.call, tl, "get_HighestWeightMotionNode")
-            if not (ok_mn and mn) then goto continue end
-            local ok_n, n = pcall(mn.call, mn, "get_MotionName")
-            if not (ok_n and n) then goto continue end
-            local name_lower = tostring(n or ""):lower()
-            if name_lower:find("recoil") or name_lower:find("fire") or name_lower:find("shot") or name_lower:find("shoot") or name_lower:find("attack") or name_lower:find("kick") then
-                return true
-            end
-            ::continue::
-        end
-    end
-    return false
-end
-
-local function get_ha_layers_cached()
-    local now = os.clock()
-    local w = cached.weapon_id
-    if _ha.layers_cache and _ha.layers_cache_weapon == w and (now - _ha.layers_cache_time) < _ha.LAYERS_CACHE_INTERVAL then
-        return _ha.layers_cache
-    end
-    _ha.layers_cache = get_all_motion_layers_is()
-    _ha.layers_cache_time = now
-    _ha.layers_cache_weapon = w
-    -- Pre-compute lowercased name and hold flag per layer entry to avoid per-frame string ops
-    for i = 1, #_ha.layers_cache do
-        local info = _ha.layers_cache[i]
-        info.name_lower = info.name:lower()
-        info.is_hold = info.name_lower:find("hold") ~= nil
-    end
-    return _ha.layers_cache
-end
-
-_ha.hotkey_activated = false
-_ha.toggle_cooldown = 0.35
-_ha.last_toggle_time = 0
-_ha.last_shot_time = 0
-_ha.pending_disengage = false
-_ha.disengage_after = 0
-_ha.pending_disengage_wkey = nil
-local HA_DISENGAGE_DELAY_AFTER_SHOT = 0.5
-
-re.on_application_entry("UpdateBehavior", function()
-    local ha_kb = (not is_hk_settings.use_ha_modifier or hk.check_hotkey("HA Modifier", true)) and hk.check_hotkey("Hold Animation Toggle", true)
-    local ha_pad = (not is_hk_settings.use_pad_ha_modifier or hk.check_hotkey("Pad HA Modifier", true)) and hk.check_hotkey("Pad Hold Animation Toggle", true)
-    local ha_down = ha_kb or ha_pad
-    local wkey = cached.weapon_id
-    local now = os.clock()
-
-    if prefs.ha_hold_to_activate then
-        if _ha.pending_disengage and now >= _ha.disengage_after and _ha.pending_disengage_wkey then
-            local pk = _ha.pending_disengage_wkey
-            if hold_anim_edits[pk] then
-                hold_anim_edits[pk].enabled = false
-                local all_ml = get_ha_layers_cached()
-                for i = 1, #all_ml do
-                    _ha.set_layer(all_ml[i].layer, 1.0, 1.0)
-                end
-                refresh_any_hold_anim()
-                save_hold_anim()
-            end
-            if _ha.breath_mfr_zeroed then
-                _acs.set_min_fit_rate(1.0)
-                _ha.breath_mfr_zeroed = false
-            end
-            if _ha.breath_pf_applied then
-                _acs.restore_point_range_all()
-                _ha.breath_pf_applied = false
-            end
-            _ha.hotkey_activated = false
-            _ha.pending_disengage = false
-            _ha.pending_disengage_wkey = nil
-            _ha.last_toggle_time = now
-        elseif ha_down and wkey then
-            if _ha.pending_disengage then
-                _ha.pending_disengage = false
-                _ha.pending_disengage_wkey = nil
-            end
-            if not _ha.hotkey_activated and (now - _ha.last_toggle_time) >= _ha.toggle_cooldown then
-                if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = { force = 1.0, speed = 0.1, ramp = 1.5 } end
-                hold_anim_edits[wkey].enabled = true
-                _ha.blend_weight = 0.0
-                _ha.active_start = nil
-                refresh_any_hold_anim()
-                save_hold_anim()
-                _ha.hotkey_activated = true
-                _ha.last_toggle_time = now
-            end
-        elseif _ha.hotkey_activated and wkey then
-            _ha.pending_disengage = true
-            _ha.disengage_after = math.max(now, _ha.last_shot_time + HA_DISENGAGE_DELAY_AFTER_SHOT)
-            _ha.pending_disengage_wkey = wkey
-        end
-    else
-        if ha_down and not ha_toggle_was_down and wkey and (now - _ha.last_toggle_time) >= _ha.toggle_cooldown then
-            if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = { force = 1.0, speed = 0.1, ramp = 1.5 } end
-            local new_state = not (hold_anim_edits[wkey].enabled or false)
-            hold_anim_edits[wkey].enabled = new_state
-            _ha.blend_weight = 0.0
-            _ha.active_start = nil
-            if not new_state then
-                local all_ml = get_ha_layers_cached()
-                for i = 1, #all_ml do
-                    _ha.set_layer(all_ml[i].layer, 1.0, 1.0)
-                end
-                if _ha.breath_mfr_zeroed then
-                    _acs.set_min_fit_rate(1.0)
-                    _ha.breath_mfr_zeroed = false
-                end
-                if _ha.breath_pf_applied then
-                    _acs.restore_point_range_all()
-                    _ha.breath_pf_applied = false
-                end
-            end
-            refresh_any_hold_anim()
-            save_hold_anim()
-            _ha.last_toggle_time = now
-        end
-    end
-    ha_toggle_was_down = ha_down or false
-end)
-
-re.on_application_entry("UpdateBehavior", function()
-    if cached.is_holding then
-        if not _ha.hold_start then _ha.hold_start = os.clock() end
-    else
-        _ha.hold_start = nil
-    end
-
-    if not _ha.any_enabled then return end
-    if not cached.weapon_id then return end
-
-    local now = os.clock()
-    local dt = now - _ha.last_time
-    _ha.last_time = now
-    if dt > 0.1 then dt = 0.016 end
-    if dt <= 0 then return end
-
-    local enabled, _, _, _, delay, ramp = get_hold_anim_for_key(cached.weapon_id)
-
-    if not enabled then
-        if _ha.blend_weight > 0 then
-            _ha.blend_weight = math.max(0, _ha.blend_weight - dt * ramp)
-            if _ha.blend_weight < 0.001 then _ha.blend_weight = 0 end
-        end
-        _ha.active_start = nil
-        if _ha.breath_mfr_zeroed then
-            _acs.set_min_fit_rate(1.0)
-            _ha.breath_mfr_zeroed = false
-        end
-        if _ha.breath_pf_applied then
-            _acs.restore_point_range_all()
-            _ha.breath_pf_applied = false
-        end
-        return
-    end
-
-    local want_active = cached.is_holding and not cached.busy_ads
-    if want_active and delay > 0 and _ha.hold_start then
-        if (now - _ha.hold_start) < delay then
-            want_active = false
-        end
-    end
-
-    local breath_dur = prefs.ha_breath_duration
-    if want_active and breath_dur > 0 then
-        if not _ha.active_start then
-            _ha.active_start = now
-        end
-        if (now - _ha.active_start) >= breath_dur then
-            want_active = false
-        end
-    end
-
-    if not want_active or not cached.is_holding then
-        if not cached.is_holding then
-            _ha.active_start = nil
-        end
-    end
-
-    -- Don't start or increase hold-breath blend until recoil animation is complete (skip for shotguns so they match ShotgunWorking behavior)
-    local recoil_playing = want_active and is_recoil_animation_playing()
-    if recoil_playing then _ha.last_shot_time = now end
-    local is_shotgun = (cached.weapon_id == "arm0100" or cached.weapon_id == "arm0103" or cached.weapon_id == "arm0104")
-    local allow_blend_in = want_active and (is_shotgun or not recoil_playing)
-    if allow_blend_in then
-        _ha.blend_weight = math.min(1.0, _ha.blend_weight + dt * ramp)
-    else
-        _ha.blend_weight = math.max(0.0, _ha.blend_weight - dt * ramp)
-        if _ha.blend_weight < 0.001 then _ha.blend_weight = 0 end
-    end
-
-    local should_zero_mfr = want_active and _ha.blend_weight > 0 and prefs.ha_apply_min_fit_rate
-    if should_zero_mfr and not _ha.breath_mfr_zeroed then
-        _acs.set_min_fit_rate(0.0)
-        _ha.breath_mfr_zeroed = true
-    elseif not should_zero_mfr and _ha.breath_mfr_zeroed then
-        _acs.set_min_fit_rate(1.0)
-        _ha.breath_mfr_zeroed = false
-    end
-
-    local should_pf = prefs.perfect_focus and want_active and _ha.blend_weight > 0 and prefs.ha_apply_min_fit_rate
-    if should_pf and not _ha.breath_pf_applied then
-        _acs.set_point_range_all(100, 100)
-        _ha.breath_pf_applied = true
-    elseif not should_pf and _ha.breath_pf_applied then
-        _acs.restore_point_range_all()
-        _ha.breath_pf_applied = false
-    end
-end)
-
-local function arm_rotation_non_zero(rot)
-    local eps = 0.0001
-    return math.abs(rot.x) > eps or math.abs(rot.y) > eps or math.abs(rot.z) > eps
-end
-
+-- Joint write helper. Shared by the canted arm pose below and by the hand/finger pose further
+-- down (which is independent of canted and runs in third person too), so it sits at file scope.
 -- Cache method objects for joint get/set (avoids string lookup per call)
 local _ah_joint_td = sdk.find_type_definition("via.Joint")
 local _ah_meth_get_rot = _ah_joint_td and _ah_joint_td:get_method("get_Rotation")
@@ -1870,21 +1759,19 @@ pcall(function()
     if Quaternion then _ah_temp_quat_native = Quaternion.new() end
 end)
 
-local arm_rot_identity_quat = { w = 1.0, x = 0.0, y = 0.0, z = 0.0 }
+local canted_aim_identity_quat = { w = 1.0, x = 0.0, y = 0.0, z = 0.0 }
 
--- Cache base offset quats (avoid 4x euler_deg_to_quat per frame); invalidated by save_arm_hand_rotation
-local _ah_off_cache_valid = false
-local _ah_cached_off_r, _ah_cached_off_l, _ah_cached_lower_r, _ah_cached_lower_l, _ah_cached_upper_r, _ah_cached_upper_l
-
+-- Returns false when the joint could not be read, which for a via.Joint means it has gone stale
+-- (the read then throws every frame); callers drop the cache rather than keep hammering it.
 local function _ah_set_joint_rotation(joint, off)
-    if not joint then return end
+    if not joint then return false end
     local ok, cur
     if _ah_meth_get_rot then
         ok, cur = pcall(_ah_meth_get_rot, joint)
     end
     if not ok or not cur then
         ok, cur = pcall(joint.call, joint, "get_Rotation")
-        if not ok or not cur then return end
+        if not ok or not cur then return false end
     end
     -- Inline quat multiply + normalize: result = cur * off
     local cw, cx, cy, cz = cur.w, cur.x, cur.y, cur.z
@@ -1909,7 +1796,18 @@ local function _ah_set_joint_rotation(joint, off)
         cur.w = rw; cur.x = rx; cur.y = ry; cur.z = rz
         pcall(joint.call, joint, "set_Rotation", cur)
     end
+    return true
 end
+
+local function _re9_canted_scope() -- canted-aim / arm-rotation (breath-hold moved to re9holdbreath)
+local function canted_aim_non_zero(rot)
+    local eps = 0.0001
+    return math.abs(rot.x) > eps or math.abs(rot.y) > eps or math.abs(rot.z) > eps
+end
+
+-- Cache base offset quats (avoid 4x euler_deg_to_quat per frame); invalidated by save_arm_hand_rotation
+local _ah_off_cache_valid = false
+local _ah_cached_off_r, _ah_cached_off_l, _ah_cached_lower_r, _ah_cached_lower_l, _ah_cached_upper_r, _ah_cached_upper_l
 
 -- Pre-allocated offset quats for slerp results (avoid per-frame table creation)
 local _ah_slerp = {
@@ -1930,21 +1828,29 @@ local function is_in_cover_state()
 end
 
 local function apply_arm_hand_rotation()
-    if arm_rot_state.blend <= 0 then return end
     if not cached.weapon_id then return end
-    if cached_view_mode ~= 1 then return end -- canted only in first person
-    refresh_cached_game_paused()
-    if cached_game_paused then return end
-    -- Blend canted out when in cover (ah_cover_apply_blend is updated in LateUpdateBehavior)
-    local effective_blend = arm_rot_state.blend * ah_hold_apply_blend * ah_cover_apply_blend
+    if cached_view_mode ~= 1 then return end -- arm pose only in first person
+    -- The canted blend, for EVERY weapon including a replaced one. A publishing
+    -- mod supplies FINGER rotations (see m4a1_fingers) and nothing else -
+    -- it does not pin the blend, so canted still fades in and out normally on its
+    -- weapon. A per-weapon pin was tried here and removed: it made the toggle do
+    -- nothing on that gun, which is the whole behaviour being protected.
+    local canted_blend = prefs.pose_ignore_canted and 1.0 or canted_aim_state.blend
+    if canted_blend <= 0 then return end
+    -- Blend out when in cover (ah_cover_apply_blend is updated in LateUpdateBehavior)
+    local effective_blend = canted_blend * ah_hold_apply_blend * ah_cover_apply_blend
     if effective_blend <= 0 then return end
     local hand_rot = get_arm_hand_rotation(cached.weapon_id)
     local lower_rot = get_arm_lower_rotation(cached.weapon_id)
     local upper_rot = get_arm_upper_rotation(cached.weapon_id)
-    local hand_nz = arm_rotation_non_zero(hand_rot)
-    local lower_nz = arm_rotation_non_zero(lower_rot)
-    local upper_nz = arm_rotation_non_zero(upper_rot)
+    local hand_nz = canted_aim_non_zero(hand_rot)
+    local lower_nz = canted_aim_non_zero(lower_rot)
+    local upper_nz = canted_aim_non_zero(upper_rot)
     if not hand_nz and not lower_nz and not upper_nz then return end
+    -- Pause is the only SDK read in the gate chain, so it comes last -- once we already know
+    -- there is something to apply this frame.
+    refresh_cached_game_paused()
+    if cached_game_paused then return end
     resolve_arm_hand_joints()
 
     _ah_cached_off_r = arm_hand_offset_quat_r(hand_rot)
@@ -1972,25 +1878,25 @@ local function apply_arm_hand_rotation()
     end
 
     if hand_nz then
-        local q = quat_slerp(arm_rot_identity_quat, _ah_cached_off_r, blend)
+        local q = quat_slerp(canted_aim_identity_quat, _ah_cached_off_r, blend)
         _ah_slerp.r.w = q.w; _ah_slerp.r.x = q.x; _ah_slerp.r.y = q.y; _ah_slerp.r.z = q.z
-        q = quat_slerp(arm_rot_identity_quat, _ah_cached_off_l, blend)
+        q = quat_slerp(canted_aim_identity_quat, _ah_cached_off_l, blend)
         _ah_slerp.l.w = q.w; _ah_slerp.l.x = q.x; _ah_slerp.l.y = q.y; _ah_slerp.l.z = q.z
         _ah_set_joint_rotation(joints.r_arm_hand, _ah_slerp.r)
         _ah_set_joint_rotation(joints.l_arm_hand, _ah_slerp.l)
     end
     if lower_nz then
-        local q = quat_slerp(arm_rot_identity_quat, _ah_cached_lower_r, blend)
+        local q = quat_slerp(canted_aim_identity_quat, _ah_cached_lower_r, blend)
         _ah_slerp.lr.w = q.w; _ah_slerp.lr.x = q.x; _ah_slerp.lr.y = q.y; _ah_slerp.lr.z = q.z
-        q = quat_slerp(arm_rot_identity_quat, _ah_cached_lower_l, blend)
+        q = quat_slerp(canted_aim_identity_quat, _ah_cached_lower_l, blend)
         _ah_slerp.ll.w = q.w; _ah_slerp.ll.x = q.x; _ah_slerp.ll.y = q.y; _ah_slerp.ll.z = q.z
         _ah_set_joint_rotation(joints.r_arm_lower, _ah_slerp.lr)
         _ah_set_joint_rotation(joints.l_arm_lower, _ah_slerp.ll)
     end
     if upper_nz then
-        local q = quat_slerp(arm_rot_identity_quat, _ah_cached_upper_r, blend)
+        local q = quat_slerp(canted_aim_identity_quat, _ah_cached_upper_r, blend)
         _ah_slerp.ur.w = q.w; _ah_slerp.ur.x = q.x; _ah_slerp.ur.y = q.y; _ah_slerp.ur.z = q.z
-        q = quat_slerp(arm_rot_identity_quat, _ah_cached_upper_l, blend)
+        q = quat_slerp(canted_aim_identity_quat, _ah_cached_upper_l, blend)
         _ah_slerp.ul.w = q.w; _ah_slerp.ul.x = q.x; _ah_slerp.ul.y = q.y; _ah_slerp.ul.z = q.z
         _ah_set_joint_rotation(joints.r_arm_upper, _ah_slerp.ur)
         _ah_set_joint_rotation(joints.l_arm_upper, _ah_slerp.ul)
@@ -2015,158 +1921,190 @@ re.on_application_entry("LateUpdateBehavior", function()
         ah_cover_apply_blend = math.min(1.0, ah_cover_apply_blend + dt_hold * AH_COVER_APPLY_RATE)
     end
 
-    local target = arm_rotation_enabled and 1.0 or 0.0
+    local target = canted_aim_enabled and 1.0 or 0.0
 
     -- Fast path: already settled at target — only re-apply rotation, skip all blend math
-    if arm_rot_state.blend == target and not arm_rot_state.in_transition and not arm_rot_state.overshoot_active then
+    if canted_aim_state.blend == target and not canted_aim_state.in_transition and not canted_aim_state.overshoot_active then
         apply_arm_hand_rotation()
         return
     end
 
-    local dt = now - arm_rot_state.blend_last_time
+    local dt = now - canted_aim_state.blend_last_time
     if dt < 0 then dt = 0 end
-    arm_rot_state.blend_last_time = now
+    canted_aim_state.blend_last_time = now
     if dt > 0.05 then dt = 0.05 end
 
-    if target ~= arm_rot_state.prev_target then
-        arm_rot_state.prev_target = target
-        arm_rot_state.in_transition = true
-        arm_rot_state.transition_start_time = now
-        arm_rot_state.transition_start_blend = arm_rot_state.blend
+    if target ~= canted_aim_state.prev_target then
+        canted_aim_state.prev_target = target
+        canted_aim_state.in_transition = true
+        canted_aim_state.transition_start_time = now
+        canted_aim_state.transition_start_blend = canted_aim_state.blend
         -- Cancel any active overshoot when target changes
-        arm_rot_state.overshoot_active = false
+        canted_aim_state.overshoot_active = false
     end
 
-    if arm_rot_state.in_transition then
-        local duration = (target > 0.5) and math.max(0.001, ARM_ROT_TRANSITION_IN) or math.max(0.001, ARM_ROT_TRANSITION_OUT)
-        local elapsed = now - arm_rot_state.transition_start_time
+    if canted_aim_state.in_transition then
+        local duration = (target > 0.5) and math.max(0.001, CANTED_AIM_TRANSITION_IN) or math.max(0.001, CANTED_AIM_TRANSITION_OUT)
+        local elapsed = now - canted_aim_state.transition_start_time
         if elapsed >= duration then
-            arm_rot_state.in_transition = false
+            canted_aim_state.in_transition = false
             -- Start overshoot oscillation
-            arm_rot_state.overshoot_active = true
-            arm_rot_state.overshoot_start_time = now
-            arm_rot_state.overshoot_target = target
-            arm_rot_state.blend = target
+            canted_aim_state.overshoot_active = true
+            canted_aim_state.overshoot_start_time = now
+            canted_aim_state.overshoot_target = target
+            canted_aim_state.blend = target
         else
-            arm_rot_state.blend = arm_rot_state.transition_start_blend + (target - arm_rot_state.transition_start_blend) * smoothstep(elapsed / duration)
+            canted_aim_state.blend = canted_aim_state.transition_start_blend + (target - canted_aim_state.transition_start_blend) * smoothstep(elapsed / duration)
         end
-    elseif arm_rot_state.overshoot_active then
-        local elapsed = now - arm_rot_state.overshoot_start_time
-        local duration = math.max(0.01, prefs.arm_rot_wobble_duration or 1.6)
+    elseif canted_aim_state.overshoot_active then
+        local elapsed = now - canted_aim_state.overshoot_start_time
+        local duration = math.max(0.01, prefs.canted_aim_wobble_duration or 1.6)
         if elapsed >= duration then
             -- Done with oscillations, settle to target
-            arm_rot_state.overshoot_active = false
-            arm_rot_state.blend = arm_rot_state.overshoot_target
+            canted_aim_state.overshoot_active = false
+            canted_aim_state.blend = canted_aim_state.overshoot_target
         else
             -- Damped sine oscillation: amplitude * exp(-damping * t) * sin(frequency * t)
             local t = elapsed
-            local amp = prefs.arm_rot_wobble_amplitude or 0.04
-            local freq = prefs.arm_rot_wobble_frequency or 21.0
-            local damp = prefs.arm_rot_wobble_damping or 6.3
+            local amp = prefs.canted_aim_wobble_amplitude or 0.04
+            local freq = prefs.canted_aim_wobble_frequency or 21.0
+            local damp = prefs.canted_aim_wobble_damping or 6.3
             local overshoot = amp * math.exp(-damp * t) * math.sin(freq * t)
-            arm_rot_state.blend = arm_rot_state.overshoot_target + overshoot
+            canted_aim_state.blend = canted_aim_state.overshoot_target + overshoot
             -- Clamp to valid range
-            if arm_rot_state.blend < 0.0 then arm_rot_state.blend = 0.0
-            elseif arm_rot_state.blend > 1.0 then arm_rot_state.blend = 1.0 end
+            if canted_aim_state.blend < 0.0 then canted_aim_state.blend = 0.0
+            elseif canted_aim_state.blend > 1.0 then canted_aim_state.blend = 1.0 end
         end
     else
-        arm_rot_state.blend = target
+        canted_aim_state.blend = target
     end
 
     apply_arm_hand_rotation()
 end)
+end
+_re9_canted_scope()
 
--- Reusable sel_set table and helper to avoid per-frame allocation
-_ha.sel_set = {}
-_ha.sel_count = 0
+-- Hand / finger pose. Deliberately its own pass: it is a grip fix, not part of the canted aim, so
+-- it is independent of canted, of Standard FPS and of the view mode -- it has to hold in third
+-- person the same as in first. Registered after the canted pass so the arm joints settle first.
+local _fj_list = {}
+local _fj_key = nil
+local _fj_generation = -1
 
-_ha.set_layer = function(layer, blend_val, speed_val)
-    if _ha.meth_set_blend then
-        pcall(_ha.meth_set_blend, layer, blend_val)
-    else
-        pcall(layer.call, layer, "set_BlendRate", blend_val)
-    end
-    if _ha.meth_set_speed then
-        pcall(_ha.meth_set_speed, layer, speed_val)
-    else
-        pcall(layer.call, layer, "set_Speed", speed_val)
-    end
+--- The finger table a publishing mod supplies for this weapon, or nil. The
+--- getter override alone was not enough: the APPLY path reads finger_rotations
+--- directly and never calls it, so published joints reached the UI and nothing
+--- else. Both places below now consult this.
+local function m4a1_fingers(weapon_key)
+    local o = rawget(_G, "M4A1_ArmPose")
+    if type(o) ~= "table" or o.key ~= weapon_key then return nil end
+    return type(o.fingers) == "table" and o.fingers or nil
 end
 
--- Build sel_set from sel_layers + all_layers, reusing the table
-local function _ha_build_sel_set(all_layers, sel_layers)
-    -- Clear previous entries
-    for k in pairs(_ha.sel_set) do _ha.sel_set[k] = nil end
-    _ha.sel_count = 0
-
-    if sel_layers then
-        for i = 1, #sel_layers do _ha.sel_set[sel_layers[i]] = true end
+--- Cheap signature of those values, so a slider edit rebuilds the baked quats.
+--- They are published every frame and edited live, so a dirty FLAG cannot see
+--- the change - only the values themselves can.
+local function m4a1_finger_sig(weapon_key)
+    local f = m4a1_fingers(weapon_key)
+    if not f then return "" end
+    local acc = {}
+    for jn, t in pairs(f) do
+        acc[#acc + 1] = string.format("%s:%.3f,%.3f,%.3f", jn,
+                                      t.x or 0, t.y or 0, t.z or 0)
     end
+    table.sort(acc)
+    return table.concat(acc, "|")
+end
 
-    -- Filter: only keep sel entries whose layer name contains "hold"
-    for i = 1, #all_layers do
-        local info = all_layers[i]
-        if _ha.sel_set[info.idx] and not info.is_hold then
-            _ha.sel_set[info.idx] = nil
+local function rebuild_finger_apply_list(weapon_key)
+    _fj_list = {}
+    _fj_key = weapon_key
+    _fj_generation = finger_joints_generation
+    finger_apply_dirty = false
+    _fj_m4a1_sig = m4a1_finger_sig(weapon_key)
+    local w = weapon_key and finger_rotations[weapon_key]
+    local pub = m4a1_fingers(weapon_key)
+    if not w and not pub then return end
+    -- Merged, with the published values winning per JOINT: a joint the mod does
+    -- not name still comes from the saved file.
+    local merged = {}
+    for jname, rot in pairs(w or {}) do merged[jname] = rot end
+    for jname, rot in pairs(pub or {}) do merged[jname] = rot end
+    for jname, rot in pairs(merged) do
+        local j = finger_joint_by_name[jname]
+        if j then
+            _fj_list[#_fj_list + 1] = { joint = j, quat = euler_deg_to_quat(rot.x or 0, rot.y or 0, rot.z or 0) }
         end
     end
-
-    -- If nothing left, select all hold layers
-    if not next(_ha.sel_set) then
-        for i = 1, #all_layers do
-            local info = all_layers[i]
-            if info.is_hold then
-                _ha.sel_set[info.idx] = true
-            end
-        end
-    end
-
-    -- Count for fast empty check
-    _ha.sel_count = 0
-    for _ in pairs(_ha.sel_set) do _ha.sel_count = _ha.sel_count + 1 end
 end
 
 re.on_application_entry("LateUpdateBehavior", function()
-    if not _ha.any_enabled then return end
-    if not cached.weapon_id then return end
-
-    local enabled, force, speed, sel_layers = get_hold_anim_for_key(cached.weapon_id)
-    if not enabled then
-        if _ha.was_holding and _ha.blend_weight <= 0 then
-            local all_layers = get_ha_layers_cached()
-            for i = 1, #all_layers do
-                _ha.set_layer(all_layers[i].layer, 1.0, 1.0)
-            end
-            _ha.was_holding = false
-        end
-        return
+    local wkey = cached.weapon_id
+    if not wkey then return end
+    local w = finger_rotations[wkey]
+    if (not w or next(w) == nil) and not m4a1_fingers(wkey) then return end
+    -- Pause is the only SDK read in the gate chain, so it comes last of the cheap checks
+    refresh_cached_game_paused()
+    if cached_game_paused then return end
+    resolve_arm_hand_joints()
+    -- Generation covers a re-scan (player spawn, first/third person model swap) picking up a name
+    -- that was unresolved before, without rebuilding every frame while it stays unresolved.
+    if finger_apply_dirty or _fj_key ~= wkey or _fj_generation ~= finger_joints_generation
+       or _fj_m4a1_sig ~= m4a1_finger_sig(wkey) then
+        rebuild_finger_apply_list(wkey)
     end
-
-    local all_layers = get_ha_layers_cached()
-    _ha_build_sel_set(all_layers, sel_layers)
-    if _ha.sel_count == 0 then return end
-
-    if _ha.blend_weight > 0 then
-        local t = _ha.blend_weight
-        local blended_force = 1.0 + (force - 1.0) * t
-        local blended_speed = 1.0 + (speed - 1.0) * t
-        for i = 1, #all_layers do
-            local info = all_layers[i]
-            if _ha.sel_set[info.idx] then
-                _ha.set_layer(info.layer, blended_force, blended_speed)
-            end
+    for i = 1, #_fj_list do
+        if not _ah_set_joint_rotation(_fj_list[i].joint, _fj_list[i].quat) then
+            -- Stale joint: drop the caches so the next resolve rebuilds them
+            arm_hand_cached_player_go = nil
+            finger_apply_dirty = true
+            return
         end
-        _ha.was_holding = true
-    elseif _ha.was_holding then
-        for i = 1, #all_layers do
-            local info = all_layers[i]
-            if _ha.sel_set[info.idx] then
-                _ha.set_layer(info.layer, 1.0, 1.0)
-            end
-        end
-        _ha.was_holding = false
     end
 end)
+
+-- Per-joint hand/finger editor. One collapsible node per discovered joint so a full hand stays
+-- navigable, names straight off the skeleton, and each joint independent per side (the left hand
+-- grips a different part of the weapon, so there is nothing sensible to mirror).
+local function draw_finger_side_ui(key, side, side_id, label)
+    if not imgui.tree_node(label .. "##fingers_" .. side_id) then return end
+    local list = finger_joints[side]
+    if #list == 0 then
+        imgui.text_colored("No finger joints found yet (list fills in once the player is loaded)", 0xFF00FFFF)
+        imgui.tree_pop()
+        return
+    end
+    for i = 1, #list do
+        local jname = list[i].name
+        local r = get_finger_rotation(key, jname)
+        local edited = (r.x ~= 0 or r.y ~= 0 or r.z ~= 0)
+        if imgui.tree_node((edited and "* " or "") .. jname .. "##fj_node_" .. jname) then
+            local cx, cy, cz, nx, ny, nz
+            cx, nx = imgui.drag_float("X (deg)##fjx_" .. jname, r.x, 0.5, -180.0, 180.0, "%.1f")
+            if cx then r.x = nx end
+            cy, ny = imgui.drag_float("Y (deg)##fjy_" .. jname, r.y, 0.5, -180.0, 180.0, "%.1f")
+            if cy then r.y = ny end
+            cz, nz = imgui.drag_float("Z (deg)##fjz_" .. jname, r.z, 0.5, -180.0, 180.0, "%.1f")
+            if cz then r.z = nz end
+            if cx or cy or cz then
+                set_finger_rotation(key, jname, r.x, r.y, r.z)
+                save_arm_hand_rotation()
+            end
+            if imgui.button("Reset##fjreset_" .. jname) then
+                set_finger_rotation(key, jname, 0.0, 0.0, 0.0)
+                save_arm_hand_rotation()
+            end
+            imgui.tree_pop()
+        end
+    end
+    if imgui.button("Reset all##fjresetall_" .. side_id) then
+        local names = {}
+        for i = 1, #list do names[list[i].name] = true end
+        clear_finger_rotations(key, names)
+        save_arm_hand_rotation()
+    end
+    imgui.tree_pop()
+end
 
 re.on_draw_ui(function()
     if imgui.tree_node("Iron Sights") then
@@ -2180,82 +2118,121 @@ re.on_draw_ui(function()
             prefs.standard_fps_mode = standard_fps_mode
             save_prefs()
             sync_auto_iron_sight()
+            pending_sfps_camera_event = true
         end
-        -- local ads_sniper_c, ads_sniper_v = imgui.checkbox("Disable SFPS During ADS (Snipers)", prefs.sfps_disable_ads_snipers)
-        -- if imgui.is_item_hovered() then
-        --     imgui.set_tooltip("Disables Standard FPS offset when using scopes/red dots on Classic 70 and Marksman 1A")
-        -- end
-        -- if ads_sniper_c then
-        --     prefs.sfps_disable_ads_snipers = ads_sniper_v
-        --     save_prefs()
-        -- end
-        -- local muz_sniper_c, muz_sniper_v = imgui.checkbox("Disable Muzzle Spawn During ADS for Snipers)", prefs.muzzle_disable_ads_snipers)
-        -- if imgui.is_item_hovered() then
-        --     imgui.set_tooltip("Disables bullet-from-muzzle when using scopes/red dots on Classic 70 and Marksman 1A")
-        -- end
-        if muz_sniper_c then
-            prefs.muzzle_disable_ads_snipers = muz_sniper_v
-            save_prefs()
+        if imgui.tree_node("Standard FPS transition wobble") then
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip(
+                    "When you turn Standard FPS Mode on or off (hotkey, or gamepad), a slight wobbble/settling effect is applied for a more realistic feel"
+                )
+            end
+            local sfa, sff, sfd, sfdu
+            sfa, prefs.sfps_wobble_amplitude = imgui.slider_float("Side-to-side amplitude##sfps_wobble", prefs.sfps_wobble_amplitude, 0.0, 0.06, "%.4f")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip(
+                    "How strong the side to side wobble is (scaled along the camera offset transition)")
+            end
+            if sfa then save_prefs() end
+            local sfz
+            sfz, prefs.sfps_wobble_forward_amplitude = imgui.slider_float("Back/Forward amplitude##sfps_wobble_z", prefs.sfps_wobble_forward_amplitude, 0.0, 0.06, "%.4f")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip(
+                    "Adds oscillation purely on back/forward offset")
+            end
+            if sfz then save_prefs() end
+            sff, prefs.sfps_wobble_frequency = imgui.slider_float("Frequency##sfps_wobble", prefs.sfps_wobble_frequency, 1.0, 40.0, "%.1f")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip(
+                    "Oscillation rate (roughly cycles per second feel). Higher = quicker, tighter shakes; lower = slower, wider rolls"
+                )
+            end
+            if sff then save_prefs() end
+            sfd, prefs.sfps_wobble_damping = imgui.slider_float("Damping##sfps_wobble", prefs.sfps_wobble_damping, 0.5, 10.0, "%.1f")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip(
+                    "How fast weapon settles")
+            end
+            if sfd then save_prefs() end
+            sfdu, prefs.sfps_wobble_duration = imgui.slider_float("Duration (sec)##sfps_wobble", prefs.sfps_wobble_duration, 0.2, 4.0, "%.2f")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip(
+                    "Length of time the wobble is active (seconds)"
+                )
+            end
+            if sfdu then save_prefs() end
+            if imgui.button("Reset to Defaults##sfps_wobble") then
+                prefs.sfps_wobble_amplitude = 0.007
+                prefs.sfps_wobble_forward_amplitude = 0.007
+                prefs.sfps_wobble_frequency = 23.5
+                prefs.sfps_wobble_damping = 7.5
+                prefs.sfps_wobble_duration = 0.85
+                save_prefs()
+            end
+            imgui.tree_pop()
         end
-        local ais_changed, ais_new = imgui.checkbox("Auto Hide Crosshair Mode", prefs.auto_iron_sight)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Shows crosshair in default view; hides crosshair and enables muzzle spawn in iron sights")
-        end
-        if ais_changed then
-            prefs.auto_iron_sight = ais_new
-            save_prefs()
-            if ais_new then
-                sync_auto_iron_sight()
-            else
-                hide_reticle = prefs.hide_reticle
-                bullet_from_muzzle = prefs.bullet_from_muzzle
+        -- RE9Laser owns the reticle while it's active: its dot draws through the same Gui_ui2020
+        -- element, so either of these hiding it would take the dot down too. Removed from the menu
+        -- here, and not applied (see the draw hook and sync_auto_iron_sight).
+        if re9_laser_active() then
+            imgui.text("Crosshair hiding: managed by RE9 Laser")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("RE9 Laser is loaded and owns the reticle. Its laser dot draws through the\n"
+                    .. "same element as the crosshair, so hiding the crosshair would hide the dot.\n"
+                    .. "Auto Hide Crosshair Mode and Hide Reticle are disabled while it is active.")
+            end
+        else
+            local ais_changed, ais_new = imgui.checkbox("Auto Hide Crosshair Mode", prefs.auto_iron_sight)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Shows crosshair in default view; hides crosshair and enables muzzle spawn in iron sights")
+            end
+            if ais_changed then
+                prefs.auto_iron_sight = ais_new
+                save_prefs()
+                if ais_new then
+                    sync_auto_iron_sight()
+                else
+                    hide_reticle = prefs.hide_reticle
+                    bullet_from_muzzle = prefs.bullet_from_muzzle
+                end
             end
         end
         if not prefs.auto_iron_sight then
+        if not re9_laser_active() then
         local ret_changed
         ret_changed, hide_reticle = imgui.checkbox("Hide Reticle in First Person", hide_reticle)
         if ret_changed then
             prefs.hide_reticle = hide_reticle
-            if not hide_reticle and bullet_from_muzzle then
-                bullet_from_muzzle = false
-                prefs.bullet_from_muzzle = false
-            end
             save_prefs()
         end
-        if hide_reticle then
+        end
+        -- Muzzle spawn is independent of hiding the crosshair: allow it with the reticle on.
+        if re9_laser_active() then
+            imgui.text("Spawn Bullet From Muzzle: managed by RE9 Laser")
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("RE9 Laser is loaded and handles bullet spawn itself, so IronSights' muzzle spawn is disabled to avoid conflicting edits.")
+            end
+        elseif re9_3d_crosshair_active() then
+            bullet_from_muzzle = true
+            imgui.text("Spawn Bullet From Muzzle: ON (RE93DCrosshair detected)")
+        else
             local muzzle_changed
             muzzle_changed, bullet_from_muzzle = imgui.checkbox("Spawn Bullet From Muzzle", bullet_from_muzzle)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Spawns bullets from the muzzle in first person, whether or not the crosshair is hidden.")
+            end
             if muzzle_changed then
                 prefs.bullet_from_muzzle = bullet_from_muzzle
                 save_prefs()
             end
-            if bullet_from_muzzle then
-                -- imgui.text("  Joint: " .. muzzle.debug_joint_name)
-                if muzzle.debug_joint_name == "NOT FOUND" and muzzle.debug_all_joints ~= "" then
-                    imgui.text_colored("  All joints: " .. muzzle.debug_all_joints, 0xFF00FFFF)
-                end
-            end
         end
         end
-        local mfr_changed, mfr_new = imgui.checkbox("Steady Camera and Focus During Breath Hold", prefs.ha_apply_min_fit_rate)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("When checked, holding breath applies min fit rate (camera shake) and point range (reticle fit). Uncheck to leave both unchanged during hold breath.")
-        end
-        if mfr_changed then
-            prefs.ha_apply_min_fit_rate = mfr_new
-            save_prefs()
-        end
+        holdbreath.draw_menu()
         imgui.separator()
 
         local equipped_id = cached.weapon_id
         if equipped_id then
             local eid_name = WEAPON_NAMES[equipped_id] or equipped_id
-            -- local state_label = cached.fps_state and (" | " .. (COVER_STATE_LABELS[cached.fps_state] or cached.fps_state)) or ""
             imgui.text_colored("Equipped: " .. eid_name, 0xFFFFFF00)
-            -- local is_sniper = equipped_id == "arm0600" or equipped_id == "arm0601"
-            -- imgui.text(string.format("  DBG MUZZLE: busy_ads=%s | suppressed=%s | bfm=%s | sniper=%s",
-            --     tostring(cached.busy_ads), tostring(_muzzle_ads_suppressed),
-            --     tostring(bullet_from_muzzle), tostring(is_sniper)))
 
             if equipped_id ~= ui_state.last_equipped_id then
                 for i, key in ipairs(dropdown_items) do
@@ -2364,34 +2341,50 @@ re.on_draw_ui(function()
                         ui_state.reset_confirm = false
                     end
                 end
-                --[[ Copy to All
-                imgui.same_line()
-                if not ui_state.copy_all_confirm then
-                    if imgui.button("Copy to All") then
-                        ui_state.copy_all_confirm = true
+                if imgui.tree_node("Cover offsets") then
+                    if imgui.is_item_hovered() then
+                        imgui.set_tooltip(
+                            "Camera offset while aiming from cover (leaning left or right). "
+                            .. "Crouch cover uses the same values as stand cover. "
+                        )
                     end
-                else
-                    imgui.text_colored("Apply to all weapons?", 0xFF00FFFF)
-                    if imgui.button("Yes") then
-                        for _, wk in ipairs(WEAPON_KEYS) do
-                            if cover_state == "StandardFPS" then
-                                set_standard_fps_offset(wk, ui_offset.x, ui_offset.y, ui_offset.z)
-                            elseif cover_state then
-                                set_cover_offset(wk, cover_state, ui_offset.x, ui_offset.y, ui_offset.z)
-                            else
-                                weapon_offsets[wk] = { x = ui_offset.x, y = ui_offset.y, z = ui_offset.z }
+                    local function draw_cover_side(cover_action, title)
+                        if imgui.tree_node(title .. "##cover_ui_" .. cover_action) then
+                            local co = effective_cover_offset(key, cover_action)
+                            local cx = co and (co.x or 0) or 0
+                            local cy = co and (co.y or 0) or 0
+                            local cz = co and (co.z or 0) or 0
+                            local ax, axn = imgui.drag_float("Left/Right##" .. cover_action, cx, 0.001, -5.0, 5.0, "%.4f")
+                            if ax then cx = axn end
+                            local ay, ayn = imgui.drag_float("Up/Down##" .. cover_action, cy, 0.001, -5.0, 5.0, "%.4f")
+                            if ay then cy = ayn end
+                            local az, azn = imgui.drag_float("Back/Forward##" .. cover_action, cz, 0.001, -5.0, 5.0, "%.4f")
+                            if az then cz = azn end
+                            if ax or ay or az then
+                                set_cover_offset(key, cover_action, cx, cy, cz)
                             end
+                            if imgui.button("Reset##cover_reset_" .. cover_action) then
+                                local def = DEFAULT_COVER_OFFSETS[key .. "|" .. cover_action]
+                                if def then
+                                    set_cover_offset(key, cover_action, def.x, def.y, def.z)
+                                else
+                                    set_cover_offset(key, cover_action, 0.0, 0.0, 0.0)
+                                end
+                            end
+                            if imgui.is_item_hovered() then
+                                if DEFAULT_COVER_OFFSETS[key .. "|" .. cover_action] then
+                                    imgui.set_tooltip("Restore mod default for this weapon and cover side.")
+                                else
+                                    imgui.set_tooltip("No bundled default for this weapon; reset to 0,0,0.")
+                                end
+                            end
+                            imgui.tree_pop()
                         end
-                        if cover_state == "StandardFPS" then save_standard_fps_offsets() end
-                        if not cover_state then save_offsets() end
-                        ui_state.copy_all_confirm = false
                     end
-                    imgui.same_line()
-                    if imgui.button("No") then
-                        ui_state.copy_all_confirm = false
-                    end
+                    draw_cover_side("CoverActionRight", "Cover right")
+                    draw_cover_side("CoverActionLeft", "Cover left")
+                    imgui.tree_pop()
                 end
-                --]]
                 imgui.tree_pop()
             end
 
@@ -2413,13 +2406,24 @@ re.on_draw_ui(function()
                 imgui.tree_pop()
             end
 
+            -- Hand / finger joints (everything under R_Arm_Hand / L_Arm_Hand) — per weapon, per
+            -- joint. Its own section, not part of Canted Aim: this pose applies in first and
+            -- third person and does not care about canted, Standard FPS or iron sights.
+            if imgui.tree_node("Hand / Finger Joints") then
+                resolve_arm_hand_joints()
+                imgui.text_colored("Applies always (first and third person), independent of aim mode.", 0xFF80FF80)
+                draw_finger_side_ui(key, "r", "right", "Right hand")
+                draw_finger_side_ui(key, "l", "left", "Left hand")
+                imgui.tree_pop()
+            end
+
             if imgui.tree_node("Canted Aim") then
                 local ar_dbl_kb_t, ar_dbl_pad_t
-                ar_dbl_kb_t, prefs.arm_rot_toggle_double_press_kb = imgui.checkbox("KB/Mouse: require double press##canted_dbl_kb", prefs.arm_rot_toggle_double_press_kb)
+                ar_dbl_kb_t, prefs.canted_aim_toggle_double_press_kb = imgui.checkbox("KB/Mouse: require double press##canted_dbl_kb", prefs.canted_aim_toggle_double_press_kb)
                 if imgui.is_item_hovered() then
                     imgui.set_tooltip("Keyboard/mouse canted hotkey: if unchecked, one press toggles; if checked, two quick presses toggle.")
                 end
-                ar_dbl_pad_t, prefs.arm_rot_toggle_double_press_pad = imgui.checkbox("Gamepad: require double press##canted_dbl_pad", prefs.arm_rot_toggle_double_press_pad)
+                ar_dbl_pad_t, prefs.canted_aim_toggle_double_press_pad = imgui.checkbox("Gamepad: require double press##canted_dbl_pad", prefs.canted_aim_toggle_double_press_pad)
                 if imgui.is_item_hovered() then
                     imgui.set_tooltip("Gamepad canted hotkey: if unchecked, one press toggles; if checked, two quick presses toggle.")
                 end
@@ -2502,26 +2506,26 @@ re.on_draw_ui(function()
                 -- Wobble (overshoot) settings
                 if imgui.tree_node("Wobble (overshoot)") then
                     local wob_amp_ch
-                    wob_amp_ch, prefs.arm_rot_wobble_amplitude = imgui.slider_float("Amplitude##wobble", prefs.arm_rot_wobble_amplitude, 0.0, 0.25, "%.2f")
+                    wob_amp_ch, prefs.canted_aim_wobble_amplitude = imgui.slider_float("Amplitude##wobble", prefs.canted_aim_wobble_amplitude, 0.0, 0.25, "%.2f")
                     if imgui.is_item_hovered() then imgui.set_tooltip("How much the blend overshoots (0 = no wobble). Default 0.04") end
                     if wob_amp_ch then save_prefs() end
                     local wob_freq_ch
-                    wob_freq_ch, prefs.arm_rot_wobble_frequency = imgui.slider_float("Frequency##wobble", prefs.arm_rot_wobble_frequency, 1.0, 40.0, "%.1f")
+                    wob_freq_ch, prefs.canted_aim_wobble_frequency = imgui.slider_float("Frequency##wobble", prefs.canted_aim_wobble_frequency, 1.0, 40.0, "%.1f")
                     if imgui.is_item_hovered() then imgui.set_tooltip("Speed of oscillation (higher = faster). Default 21.0") end
                     if wob_freq_ch then save_prefs() end
                     local wob_damp_ch
-                    wob_damp_ch, prefs.arm_rot_wobble_damping = imgui.slider_float("Damping##wobble", prefs.arm_rot_wobble_damping, 0.5, 10.0, "%.1f")
+                    wob_damp_ch, prefs.canted_aim_wobble_damping = imgui.slider_float("Damping##wobble", prefs.canted_aim_wobble_damping, 0.5, 10.0, "%.1f")
                     if imgui.is_item_hovered() then imgui.set_tooltip("How quickly wobble fades (higher = settles faster). Default 6.3") end
                     if wob_damp_ch then save_prefs() end
                     local wob_dur_ch
-                    wob_dur_ch, prefs.arm_rot_wobble_duration = imgui.slider_float("Duration (sec)##wobble", prefs.arm_rot_wobble_duration, 0.2, 4.0, "%.2f")
+                    wob_dur_ch, prefs.canted_aim_wobble_duration = imgui.slider_float("Duration (sec)##wobble", prefs.canted_aim_wobble_duration, 0.2, 4.0, "%.2f")
                     if imgui.is_item_hovered() then imgui.set_tooltip("How long the wobble runs before settling. Default 1.6") end
                     if wob_dur_ch then save_prefs() end
                     if imgui.button("Reset to Defaults##wobble") then
-                        prefs.arm_rot_wobble_amplitude = 0.04
-                        prefs.arm_rot_wobble_frequency = 21.0
-                        prefs.arm_rot_wobble_damping = 6.3
-                        prefs.arm_rot_wobble_duration = 1.6
+                        prefs.canted_aim_wobble_amplitude = 0.04
+                        prefs.canted_aim_wobble_frequency = 21.0
+                        prefs.canted_aim_wobble_damping = 6.3
+                        prefs.canted_aim_wobble_duration = 1.6
                         save_prefs()
                     end
                     imgui.tree_pop()
@@ -2531,188 +2535,6 @@ re.on_draw_ui(function()
         end
 
 
-        -- local mav_changed
-        -- mav_changed, prefs.muzzle_all_views = imgui.checkbox("Bullets Follow Muzzle (All Views)", prefs.muzzle_all_views)
-        -- if imgui.is_item_hovered() then
-        --     imgui.set_tooltip("Spawn bullets from the muzzle in both first-person and third-person")
-        -- end
-        -- if mav_changed then
-        --     if not prefs.muzzle_all_views then
-        --         muzzle.joint = nil
-        --         muzzle.cached_gun_go = nil
-        --         muzzle.pos = nil
-        --         muzzle.rot = nil
-        --     end
-        --     save_prefs()
-        -- end
-
-        -- imgui.spacing()
-        -- local mfr_changed, mfr_new = imgui.checkbox("Disable Min Fit Rate", prefs.zero_min_fit_rate)
-        -- if imgui.is_item_hovered() then
-        --     imgui.set_tooltip("Sets _MinFitRate to 0 for all weapons (default is 1). Removes the minimum aim camera shake intensity")
-        -- end
-        -- if mfr_changed then
-        --     prefs.zero_min_fit_rate = mfr_new
-        --     save_prefs()
-        --     _acs.applied = false
-        -- end
-        -- local pf_changed, pf_new = imgui.checkbox("Perfect Focus (Breath Hold)", prefs.perfect_focus)
-        -- if imgui.is_item_hovered() then
-        --     imgui.set_tooltip("When holding breath, sets _PointRange to 100 for instant perfect aim. Reverts when breath runs out or released")
-        -- end
-        -- if pf_changed then
-        --     prefs.perfect_focus = pf_new
-        --     save_prefs()
-        --     if not pf_new and _ha.breath_pf_applied then
-        --         _acs.restore_point_range_all()
-        --         _ha.breath_pf_applied = false
-        --     end
-        -- end
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.text_colored("Hold Animation:", 0xFFFFFF00)
-        do
-            local breath_changed, breath_new = imgui.drag_float("Breath Duration (s)", prefs.ha_breath_duration, 0.1, 0.0, 30.0, "%.1f")
-            if imgui.is_item_hovered() then
-                imgui.set_tooltip("How long the effect stays active after engaging. 0 = unlimited")
-            end
-            if breath_changed then
-                prefs.ha_breath_duration = breath_new
-                save_prefs()
-            end
-        end
-
-        --[[ Hold Animation UI commented out for release
-            local wkey = cached.weapon_id or dropdown_items[ui_state.selected_index]
-            local all_ml = get_all_motion_layers_is()
-
-            local wedit = wkey and hold_anim_edits[wkey] or {}
-            -- local dbg_force = wedit.force or 1.0
-            -- local dbg_speed = wedit.speed or 1.0
-            -- local t = _ha.blend_weight
-            -- imgui.text(string.format("  blend: %.3f | force: %.3f -> %.3f | speed: %.3f -> %.3f | holding: %s",
-            --     t, dbg_force, 1.0 + (dbg_force - 1.0) * t, dbg_speed, 1.0 + (dbg_speed - 1.0) * t, tostring(cached.is_holding)))
-            -- imgui.text(string.format("  mfr_zeroed: %s | pf_applied: %s | breath_start: %s | breath_dur: %.1f",
-            --     tostring(_ha.breath_mfr_zeroed),
-            --     tostring(_ha.breath_pf_applied),
-            --     _ha.active_start and string.format("%.1f ago", os.clock() - _ha.active_start) or "nil",
-            --     prefs.ha_breath_duration))
-            -- if #all_ml > 0 then
-            --     for _, info in ipairs(all_ml) do
-            --         local cur_br, cur_sp = 0, 0
-            --         pcall(function() cur_br = info.layer:call("get_BlendRate") end)
-            --         pcall(function() cur_sp = info.layer:call("get_Speed") end)
-            --         imgui.text(string.format("    L%d %s  BR=%.3f  Sp=%.3f", info.idx, info.name, cur_br, cur_sp))
-            --     end
-            -- end
-            if #all_ml > 0 and wkey then
-                local wedit = hold_anim_edits[wkey] or {}
-                local ha_enabled = wedit.enabled or false
-                local ha_force = wedit.force or 1.0
-                local ha_speed = wedit.speed or 1.0
-                local ha_layers = wedit.layers or {}
-
-                local hlock_changed, hlock_new = imgui.checkbox("Enable##hold_anim", ha_enabled)
-                if hlock_changed then
-                    if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
-                    hold_anim_edits[wkey].enabled = hlock_new
-                    _ha.blend_weight = 0.0
-                    _ha.active_start = nil
-                    if not hlock_new then
-                        for _, info in ipairs(all_ml) do
-                            pcall(function()
-                                info.layer:call("set_BlendRate", 1.0)
-                                info.layer:call("set_Speed", 1.0)
-                            end)
-                        end
-                        hold_anim_edits[wkey].layers = {}
-                    end
-                    ha_enabled = hlock_new
-                    refresh_any_hold_anim()
-                    save_hold_anim()
-                end
-
-                if ha_enabled then
-                    local delay_val = wedit.delay or 0
-                    if type(delay_val) == "boolean" then delay_val = delay_val and 1.0 or 0 end
-                    local delay_changed, delay_new = imgui.drag_float("Delay (s)##hold_anim_delay", delay_val, 0.05, 0.0, 5.0, "%.2f")
-                    if imgui.is_item_hovered() then
-                        imgui.set_tooltip("Seconds to wait after aiming before applying overrides. 0 = no delay")
-                    end
-                    if delay_changed then
-                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
-                        hold_anim_edits[wkey].delay = delay_new
-                        save_hold_anim()
-                    end
-
-                    local ramp_val = wedit.ramp or 4.0
-                    local ramp_changed, ramp_new = imgui.drag_float("Ramp Speed##hold_anim_ramp", ramp_val, 0.1, 0.5, 30.0, "%.1f")
-                    if imgui.is_item_hovered() then
-                        imgui.set_tooltip("How fast the override blends in/out. Higher = faster. 4.0 = ~0.25s, 2.0 = ~0.5s, 10.0 = nearly instant")
-                    end
-                    if ramp_changed then
-                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
-                        hold_anim_edits[wkey].ramp = ramp_new
-                        save_hold_anim()
-                    end
-
-                    local sel_set = {}
-                    for _, idx in ipairs(ha_layers) do sel_set[idx] = true end
-
-                    imgui.text("Target Layers:")
-                    local layer_changed = false
-                    for _, info in ipairs(all_ml) do
-                        local is_hold = info.name:lower():find("hold")
-                        if is_hold then
-                            local label = "L" .. info.idx .. " " .. (info.name ~= "" and info.name or "(unnamed)")
-                            local was_on = sel_set[info.idx] or false
-                            local chk_changed, chk_new = imgui.checkbox(label .. "##hold_layer_" .. info.idx, was_on)
-                            if chk_changed then
-                                sel_set[info.idx] = chk_new or nil
-                                layer_changed = true
-                            end
-                        end
-                    end
-                    if layer_changed then
-                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
-                        local new_list = {}
-                        for _, info in ipairs(all_ml) do
-                            if sel_set[info.idx] then new_list[#new_list + 1] = info.idx end
-                        end
-                        hold_anim_edits[wkey].layers = new_list
-                        save_hold_anim()
-                    end
-
-                    local hbr_changed, hbr_new = imgui.drag_float("Hold Animation Force", ha_force, 0.01, 0.0, 1.0)
-                    if hbr_changed then
-                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
-                        hold_anim_edits[wkey].force = hbr_new
-                        for _, info in ipairs(all_ml) do
-                            if sel_set[info.idx] then
-                                pcall(function() info.layer:call("set_BlendRate", hbr_new) end)
-                            end
-                        end
-                        save_hold_anim()
-                    end
-
-                    local hspd_changed, hspd_new = imgui.drag_float("Hold Animation Speed", ha_speed, 0.1, 0.0, 100.0)
-                    if hspd_changed then
-                        if not hold_anim_edits[wkey] then hold_anim_edits[wkey] = {} end
-                        hold_anim_edits[wkey].speed = hspd_new
-                        for _, info in ipairs(all_ml) do
-                            if sel_set[info.idx] then
-                                pcall(function() info.layer:call("set_Speed", hspd_new) end)
-                            end
-                        end
-                        save_hold_anim()
-                    end
-                end
-            else
-                imgui.text("(no layers found)")
-            end
-        end
-        --]]
 
         imgui.spacing()
         imgui.separator()
@@ -2785,77 +2607,48 @@ re.on_draw_ui(function()
         imgui.text("Keyboard and Mouse:")
         imgui.indent(10)
         local ar_dbl_kb_hk
-        ar_dbl_kb_hk, prefs.arm_rot_toggle_double_press_kb = imgui.checkbox("Require double press##arm_rot_dbl_kb", prefs.arm_rot_toggle_double_press_kb)
+        ar_dbl_kb_hk, prefs.canted_aim_toggle_double_press_kb = imgui.checkbox("Require double press##canted_aim_dbl_kb", prefs.canted_aim_toggle_double_press_kb)
         if imgui.is_item_hovered() then
             imgui.set_tooltip("If checked, two quick presses toggle canted (default). If unchecked, a single press toggles.")
         end
         if ar_dbl_kb_hk then save_prefs() end
         wc = wc or ar_dbl_kb_hk
-        local armc; armc, is_hk_settings.use_arm_rot_modifier = imgui.checkbox("Use Modifier##arm_rot_kb_mod", is_hk_settings.use_arm_rot_modifier); wc = wc or armc
+        local armc; armc, is_hk_settings.use_canted_aim_modifier = imgui.checkbox("Use Modifier##canted_aim_kb_mod", is_hk_settings.use_canted_aim_modifier); wc = wc or armc
         if imgui.is_item_hovered() then
             imgui.set_tooltip("Require holding this button while pressing toggle")
         end
         imgui.same_line()
-        hk_changed = hk.hotkey_setter("Arm Rotation Modifier") or hk_changed
-        hk_changed = hk.hotkey_setter("Arm Rotation Toggle", is_hk_settings.use_arm_rot_modifier and "Arm Rotation Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Canted Aim Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Canted Aim Toggle", is_hk_settings.use_canted_aim_modifier and "Canted Aim Modifier") or hk_changed
         imgui.unindent(10)
         imgui.text("Gamepad:")
         imgui.indent(10)
         local ar_dbl_pad_hk
-        ar_dbl_pad_hk, prefs.arm_rot_toggle_double_press_pad = imgui.checkbox("Require double press##arm_rot_dbl_pad", prefs.arm_rot_toggle_double_press_pad)
+        ar_dbl_pad_hk, prefs.canted_aim_toggle_double_press_pad = imgui.checkbox("Require double press##canted_aim_dbl_pad", prefs.canted_aim_toggle_double_press_pad)
         if imgui.is_item_hovered() then
             imgui.set_tooltip("If checked, two quick presses toggle canted (default). If unchecked, a single press toggles.")
         end
         if ar_dbl_pad_hk then save_prefs() end
         wc = wc or ar_dbl_pad_hk
-        local armc2; armc2, is_hk_settings.use_pad_arm_rot_modifier = imgui.checkbox("Use Modifier##arm_rot_pad_mod", is_hk_settings.use_pad_arm_rot_modifier); wc = wc or armc2
+        local armc2; armc2, is_hk_settings.use_pad_canted_aim_modifier = imgui.checkbox("Use Modifier##canted_aim_pad_mod", is_hk_settings.use_pad_canted_aim_modifier); wc = wc or armc2
         if imgui.is_item_hovered() then
             imgui.set_tooltip("Require holding this button while pressing toggle")
         end
         imgui.same_line()
-        hk_changed = hk.hotkey_setter("Pad Arm Rotation Modifier") or hk_changed
-        hk_changed = hk.hotkey_setter("Pad Arm Rotation Toggle", is_hk_settings.use_pad_arm_rot_modifier and "Pad Arm Rotation Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Pad Canted Aim Modifier") or hk_changed
+        hk_changed = hk.hotkey_setter("Pad Canted Aim Toggle", is_hk_settings.use_pad_canted_aim_modifier and "Pad Canted Aim Modifier") or hk_changed
         imgui.unindent(10)
         imgui.unindent(10)
         imgui.separator()
 
-        imgui.text_colored(" Hold Animation Toggle:", 0xFFFFFFAA)
-        imgui.indent(10)
-        imgui.text("Keyboard and Mouse:")
-        imgui.indent(10)
-        local hmc; hmc, is_hk_settings.use_ha_modifier = imgui.checkbox("Use Modifier##ha_kb_mod", is_hk_settings.use_ha_modifier); wc = wc or hmc
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Require holding this button while pressing toggle")
-        end
-        imgui.same_line()
-        hk_changed = hk.hotkey_setter("HA Modifier") or hk_changed
-        hk_changed = hk.hotkey_setter("Hold Animation Toggle", is_hk_settings.use_ha_modifier and "HA Modifier") or hk_changed
-        imgui.unindent(10)
-        imgui.text("Gamepad:")
-        imgui.indent(10)
-        local hpc; hpc, is_hk_settings.use_pad_ha_modifier = imgui.checkbox("Use Modifier##ha_pad_mod", is_hk_settings.use_pad_ha_modifier); wc = wc or hpc
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Require holding this button while pressing toggle")
-        end
-        imgui.same_line()
-        hk_changed = hk.hotkey_setter("Pad HA Modifier") or hk_changed
-        hk_changed = hk.hotkey_setter("Pad Hold Animation Toggle", is_hk_settings.use_pad_ha_modifier and "Pad HA Modifier") or hk_changed
-        imgui.unindent(10)
-        -- local hta_c, hta_v = imgui.checkbox("Hold to Activate##ha_hta", prefs.ha_hold_to_activate)
-        -- if imgui.is_item_hovered() then
-        --     imgui.set_tooltip("When checked, Hold Animation is only active while the hotkey is held down")
-        -- end
-        if hta_c then
-            prefs.ha_hold_to_activate = hta_v
-            save_prefs()
-        end
-        imgui.unindent(10)
-        imgui.separator()
 
         if hk_changed or wc then
             hk.update_hotkey_table(is_hk_settings.hotkeys)
             json.dump_file(IS_HK_PATH, is_hk_settings)
         end
+
+        holdbreath.draw_hotkeys()
+        imgui.separator()
 
         if imgui.button("Reset Hotkeys to Defaults") then
             is_hk_settings = hk.recurse_def_settings({}, is_hk_default_settings)
@@ -2863,9 +2656,12 @@ re.on_draw_ui(function()
             hk.update_hotkey_table(is_hk_settings.hotkeys)
             json.dump_file(IS_HK_PATH, is_hk_settings)
             -- Double-press lives in prefs, not Hotkeys_data / IS_HK
-            prefs.arm_rot_toggle_double_press_kb = false
-            prefs.arm_rot_toggle_double_press_pad = true
+            prefs.canted_aim_toggle_double_press_kb = false
+            prefs.canted_aim_toggle_double_press_pad = true
             save_prefs()
+            -- Breath-hold bindings live in re9holdbreath's own file; reset them here too so
+            -- this stays the single reset for the whole Hotkeys menu.
+            holdbreath.reset_hotkeys()
         end
 
         imgui.tree_pop()
