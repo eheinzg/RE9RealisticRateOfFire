@@ -9,6 +9,13 @@
 --
 -- First person only has variants for the two cover leans and the melee weapon raise (Leon and Grace
 -- alike); the others fall back to the normal hold there.
+--
+-- The short hold (gun pulled in close) is separate and sits on top of any stance. It is the game's
+-- near-wall hold: PlayerHoldDriver.updateApplyHoldFront clears and recomputes the driver's "apply hold
+-- front" flags every frame from its wall/enemy ray (and leaves them off in first person, where there
+-- are no short-hold clips), and the HoldShortState motion variable and the shot logic follow those
+-- flags. A post-hook sets them on after the game's own pass, third person only, so the short hold
+-- behaves as it does at a wall, shooting included. The ray result itself is left alone.
 
 local hk = require("Hotkeys/Hotkeys")
 
@@ -41,16 +48,20 @@ for i, s in ipairs(STANCES) do
     names[i] = s.name
 end
 
+local SHORT = { id = "short", name = "Short hold" }
+
 local function kb_action(s) return "Aim Stance: " .. s.name end
 local function pad_action(s) return "Aim Stance Pad: " .. s.name end
 
-local default_settings = { stance = "game", hotkeys = {} }
+local default_settings = { stance = "game", short_hold = false, hotkeys = {} }
 for _, s in ipairs(STANCES) do
     if s.bits then
         default_settings.hotkeys[kb_action(s)] = "[Not Bound]"
         default_settings.hotkeys[pad_action(s)] = "[Not Bound]"
     end
 end
+default_settings.hotkeys[kb_action(SHORT)] = "[Not Bound]"
+default_settings.hotkeys[pad_action(SHORT)] = "[Not Bound]"
 
 local settings = hk.recurse_def_settings(json.load_file(SETTINGS_PATH) or {}, default_settings)
 if not by_id[settings.stance] then settings.stance = "game" end
@@ -92,6 +103,32 @@ sdk.hook(hold_td:get_method("getHoldBankTypeBit"),
         return sdk.to_ptr((bits & ~HOLD_MASK) | forced)
     end)
 
+local TPS = 0  -- app.PlayerMode
+
+local function force_short_hold(drv)
+    local ctx = drv:call("get_Context")
+    if not ctx or ctx:get_field("<CurrentViewMode>k__BackingField") ~= TPS then return end
+    drv:set_field("_IsApplyHoldFront", true)
+    drv:set_field("_IsInternalApplyHoldFront", true)
+end
+
+sdk.hook(hold_td:get_method("updateApplyHoldFront"),
+    function(args)
+        local storage = thread.get_hook_storage()
+        if not storage then return end
+        storage.drv = nil
+        if not settings.short_hold then return end
+        local ok, addr = pcall(player_hold_address)
+        if ok and addr ~= nil and sdk.to_int64(args[2]) == addr then
+            storage.drv = sdk.to_managed_object(args[2])
+        end
+    end,
+    function(retval)
+        local storage = thread.get_hook_storage()
+        if storage and storage.drv then pcall(force_short_hold, storage.drv) end
+        return retval
+    end)
+
 -- A stance key turns its stance on, or back to the game's choice when it is already on.
 local was_down = {}
 
@@ -112,6 +149,12 @@ re.on_application_entry("UpdateBehavior", function()
             was_down[s.id] = down or false
         end
     end
+    local down = hk.check_hotkey(kb_action(SHORT), true) or hk.check_hotkey(pad_action(SHORT), true)
+    if down and not was_down[SHORT.id] then
+        settings.short_hold = not settings.short_hold
+        save_settings()
+    end
+    was_down[SHORT.id] = down or false
 end)
 
 local function stance_name_of(bits)
@@ -144,6 +187,13 @@ re.on_draw_ui(function()
         imgui.set_tooltip("What the game would use if left to decide. Walk up to a wall corner or take damage to see it change.")
     end
 
+    local short_changed
+    short_changed, settings.short_hold = imgui.checkbox("Short hold (third person)", settings.short_hold)
+    if short_changed then save_settings() end
+    if imgui.is_item_hovered() then
+        imgui.set_tooltip("Gun pulled in close: the hold the game uses up against a wall, shooting included.\nWorks with any stance. Third person only: the game has no first-person short hold.")
+    end
+
     if imgui.tree_node("Hotkeys") then
         imgui.text_colored("A key turns its stance on, and back to Game decides when pressed again.", 0xFFAAAAAA)
         local hk_changed = false
@@ -154,6 +204,9 @@ re.on_draw_ui(function()
                 hk_changed = hk.hotkey_setter(pad_action(s), nil, "Pad") or hk_changed
             end
         end
+        hk_changed = hk.hotkey_setter(kb_action(SHORT), nil, SHORT.name) or hk_changed
+        imgui.same_line()
+        hk_changed = hk.hotkey_setter(pad_action(SHORT), nil, "Pad") or hk_changed
         if hk_changed then
             hk.update_hotkey_table(settings.hotkeys)
             save_settings()
