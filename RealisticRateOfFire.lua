@@ -52,7 +52,8 @@ if rof_settings.overlay_style == nil or rof_settings.overlay_style == 1 then
     end
 end
 
-local OVERLAY_STYLES = { "None", "Circles", "Rectangles", "Text" }
+-- "H&K" (cartridge pictograms) is drawn by RealisticRateOfFire.dll; without it this script shows circles for it
+local OVERLAY_STYLES = { "None", "Circles", "Rectangles", "Text", "H&K" }
 
 local WEAPON_NAMES = {
     ["arm0000"] = "Matilda IMP",
@@ -71,6 +72,7 @@ local WEAPON_NAMES = {
     ["arm0400_grace"] = "Requiem (Grace)",
     ["arm0500"] = "Gal",
     ["arm0501"] = "Stiri REVO3 A1",
+    ["arm1002"] = "MP5",
     ["arm0503"] = "Clatter Carbine",
     ["arm0505"] = "Freya's Needle",
     ["arm0600"] = "Classic 70",
@@ -83,7 +85,7 @@ local WEAPON_KEYS = {
     "arm0001", "arm0003", "arm0004", "arm0005", "arm0006", "arm0007",
     "arm0100", "arm0103", "arm0104",
     "arm0400_leon", "arm0400_grace",
-    "arm0500", "arm0501", "arm0503", "arm0505", "arm0600", "arm0601", "arm0700"
+    "arm0500", "arm0501", "arm1002", "arm0503", "arm0505", "arm0600", "arm0601", "arm0700"
 }
 
 local dropdown_options = {}
@@ -104,6 +106,95 @@ local ui_state = {
     recoil_pitch_r = 0.0,
     status = ""
 }
+
+-- RealisticRateOfFire.dll does this script's game work when it was loaded in this run of the game (its marker file is
+-- newer than the game's start): the fire-mode logic, the execFire hook, regrip, the recoil animation layer and the catalog
+-- edits. This script then keeps the menu, the profiles and the hotkeys, and talks to it two ways:
+-- RealisticRateOfFire_Edits.json (NATIVE.sync: settings, edits, Default values and menu commands, written when the menu
+-- changes something) and a byte array kept for good, handed over in RealisticRateOfFire_Bridge.json (offsets are the
+-- DLL's Block struct: +0x24 hotkey presses in; +0x28 cycles done, +0x2C mode, +0x30 id, +0x40 row, +0x50 fire mode,
+-- +0x54 smooth mode, +0x58 overlay flags out).
+local NATIVE = { on = false, n = 0, cmds = {}, done = 0, nonce = os.time() + (os.clock() % 1) }
+pcall(function()
+    local d = json.load_file("RealisticRateOfFire_Loaded.json")
+    if type(d) ~= "table" or type(d.t) ~= "number" then return end
+    local up = sdk.call_native_func(sdk.get_native_singleton("via.Application"),
+        sdk.find_type_definition("via.Application"), "get_UpTimeSecond")
+    if d.t < os.time() - (tonumber(up) or 0) - 120 then return end
+    local block = sdk.create_managed_array("System.Byte", 128):add_ref_permanent()
+    block:write_dword(0x20, 0x464F5252)      -- the DLL's magic, "RROF"
+    json.dump_file("RealisticRateOfFire_Bridge.json", { block = block:get_address() })
+    NATIVE.block, NATIVE.on = block, true
+end)
+-- a dword the DLL wrote; nil for its -1
+NATIVE.dword = function(off)
+    local v = NATIVE.block:read_dword(0x20 + off)
+    if v == nil or v == -1 or v == 0xFFFFFFFF then return nil end
+    return v
+end
+NATIVE.str = function(off)
+    local t = {}
+    for i = 0, 15 do
+        local c = NATIVE.block:read_byte(0x20 + off + i)
+        if not c or c == 0 then break end
+        t[#t + 1] = string.char(c)
+    end
+    return table.concat(t)
+end
+NATIVE.mode = function() return NATIVE.dword(0x34) end
+NATIVE.shot_type = function() return NATIVE.dword(0x30) end
+NATIVE.flags = function() return NATIVE.dword(0x38) or 0 end
+NATIVE.press = function()
+    NATIVE.block:write_dword(0x24, ((NATIVE.block:read_dword(0x24) or 0) + 1) & 0xFFFFFFFF)
+end
+-- a fire-mode cycle the DLL did: the same changes cycle_fire_mode made here
+NATIVE.take = function()
+    if not NATIVE.on then return end
+    local d = NATIVE.block:read_dword(0x28) or 0
+    if d == NATIVE.done then return end
+    NATIVE.done = d
+    local mode = NATIVE.block:read_dword(0x2C) or 0
+    local eid, eff = NATIVE.str(0x10), NATIVE.str(0x20)
+    local base_arm = (eid == "arm0000" or eid == "arm0400") and eid or nil
+    local edit = rof_get_edit_or_fallback(eff, base_arm)
+    if edit then edit.TypeOfShoot = mode end
+    if selected_index and dropdown_items[selected_index] == eff then ui_state.type_of_shoot = mode end
+    ui_state.status = ""
+end
+-- hands the DLL what the menu changed, with one command (op) when given
+NATIVE.sync = function(op, extra)
+    if not NATIVE.on then return end
+    NATIVE.take()
+    if op then
+        NATIVE.n = NATIVE.n + 1
+        local c = extra or {}
+        c.n, c.op = NATIVE.n, op
+        NATIVE.cmds[#NATIVE.cmds + 1] = c
+        if #NATIVE.cmds > 16 then table.remove(NATIVE.cmds, 1) end
+    end
+    local known = {}
+    for k in pairs(WEAPON_NAMES) do known[#known + 1] = k end
+    pcall(json.dump_file, "RealisticRateOfFire_Edits.json", {
+        nonce = NATIVE.nonce,
+        settings = {
+            disable_regrip = rof_settings.disable_regrip,
+            disable_select_fire = rof_settings.disable_select_fire,
+            smooth_semi_auto = rof_settings.smooth_semi_auto,
+            smooth_burst = rof_settings.smooth_burst,
+            enable_recoil_anim_override = rof_settings.enable_recoil_anim_override,
+            fire_mode_limit_semi_full = rof_settings.fire_mode_limit_semi_full,
+            enable_aim_camera_shake = ui_state.enable_aim_camera_shake,
+            show_fire_mode_overlay = rof_settings.show_fire_mode_overlay,
+            overlay_use_rects = rof_settings.overlay_use_rects,
+            overlay_always_show = rof_settings.overlay_always_show,
+            overlay_style = rof_settings.overlay_style,
+        },
+        known = known,
+        edits = rof_edits,
+        defaults = rof_defaults,
+        cmds = NATIVE.cmds,
+    })
+end
 
 local SHOOT_TYPES = { "Semi-Auto", "Full-Auto", "Burst" }
 
@@ -866,6 +957,7 @@ local function load_defaults()
 end
 
 load_defaults()
+NATIVE.sync()
 
 local function get_player()
     local cm = sdk.get_managed_singleton("app.CharacterManager")
@@ -1000,6 +1092,12 @@ end
 --- Push live PlayerEquipment shot fields when `edit` is the active row for what is equipped.
 local function push_live_player_equipment_shoot_data(edit)
     if not edit then return end
+    if NATIVE.on then
+        for k, v in pairs(rof_edits) do
+            if v == edit then NATIVE.sync("push_key", { key = k }); break end
+        end
+        return
+    end
     local eid_str, pe = get_equipped_weapon_id()
     if not pe or not eid_str then return end
     local base_arm = (eid_str == "arm0000" or eid_str == "arm0400") and eid_str or nil
@@ -1016,6 +1114,7 @@ local function push_live_player_equipment_shoot_data(edit)
 end
 
 local function push_live_for_current_equipment()
+    if NATIVE.on then NATIVE.sync("push_current"); return end
     local eid_str, pe = get_equipped_weapon_id()
     if not pe or not eid_str then return end
     local base_arm = (eid_str == "arm0000" or eid_str == "arm0400") and eid_str or nil
@@ -1046,6 +1145,7 @@ local function push_equip_shot_type_if_matches(weapon_key, type_of_shoot)
     local eff_now = rof_resolve_effective_weapon_key(eid_str)
     if weapon_key ~= eff_now then return end
     local v = math.floor(tonumber(type_of_shoot) + 0.5)
+    if NATIVE.on then NATIVE.sync("set_type", { v = v }); return end
     pcall(function() pe:set_field("_EquipShotType", v) end)
 end
 
@@ -1114,9 +1214,24 @@ local smooth_burst = {
 }
 
 local function smooth_get_display_mode()
+    if NATIVE.on then return NATIVE.mode() end
     if smooth_semi.active then return 0 end
     if smooth_burst.active then return 2 end
     return nil
+end
+
+-- Read-only export for other scripts (MP5Revo3.lua turns the MP5's selector lever with it):
+-- the fire mode the player sees, 0 = Semi-Auto, 1 = Full-Auto, 2 = Burst (smooth modes included).
+_G.RealisticRateOfFire = _G.RealisticRateOfFire or {}
+_G.RealisticRateOfFire.get_fire_mode = function()
+    local m = smooth_get_display_mode()
+    if m then return m end
+    if NATIVE.on then return NATIVE.shot_type() end
+    local pe = get_player_equipment()
+    if not pe then return nil end
+    local cur = nil
+    pcall(function() cur = pe:get_field("_EquipShotType") end)
+    return tonumber(cur)
 end
 
 local function cycle_fire_mode()
@@ -1203,9 +1318,17 @@ re.on_application_entry("UpdateBehavior", function()
     local pad = (not rof_hk_settings.use_pad_modifier or hk.check_hotkey("Pad Fire Mode Modifier", true)) and hk.check_hotkey("Pad Fire Mode Toggle", true)
     local is_down = km or pad
     if is_down and not toggle_was_down then
-        cycle_fire_mode()
+        if NATIVE.on then NATIVE.press() else cycle_fire_mode() end
     end
     toggle_was_down = is_down or false
+    if NATIVE.on then NATIVE.take(); return end      -- the DLL writes the smooth file
+    -- MP5.dll turns the MP5's selector lever with the fire mode. It reads the game's own mode itself; the two smooth
+    -- modes exist only here, so they are written out when they change (the first frame writes them once, clearing an old file).
+    local ss, sb = smooth_semi.active == true, smooth_burst.active == true
+    if ss ~= smooth_semi.exported or sb ~= smooth_burst.exported then
+        smooth_semi.exported, smooth_burst.exported = ss, sb
+        pcall(json.dump_file, "RealisticRateOfFire_Smooth.json", { semi = ss, burst = sb })
+    end
 end)
 
 local function get_burst_num_for_equipped()
@@ -1220,6 +1343,7 @@ local function get_burst_num_for_equipped()
     return 3
 end
 
+if not NATIVE.on then -- (the DLL does the smooth modes)
 re.on_application_entry("UpdateHID", function()
     local pe = get_player_equipment()
     cached_pe = pe
@@ -1378,10 +1502,11 @@ re.on_application_entry("UpdateHID", function()
         end
     end
 end)
+end
 
 local _bac_apply_override
 
-do
+if not NATIVE.on then -- (the DLL hooks execFire)
     local equip_td = sdk.find_type_definition("app.PlayerEquipment")
     if equip_td then
         local exec_fire = equip_td:get_method("execFire")
@@ -1573,6 +1698,7 @@ _bac_apply_override = function()
     _recoil_anim_layer_custom = true
 end
 
+if not NATIVE.on then -- (the DLL does regrip and the recoil animation layer)
 re.on_pre_application_entry("LateUpdateBehavior", function()
     if rof_settings.disable_regrip then
         local cur = get_current_updater_addr()
@@ -1624,13 +1750,16 @@ re.on_pre_application_entry("LateUpdateBehavior", function()
     end)
     _recoil_anim_layer_custom = true
 end)
+end
 
 local _cached_gui_gameobj = nil
 
 local _ui2021_td = sdk.find_type_definition("app.UI2021GuiBehavior")
-if _ui2021_td then
+if _ui2021_td and not NATIVE.on then -- (the DLL watches the game HUD)
     local _ui2021_hooked = false
-    for _, mname in ipairs({"update", "lateUpdate", "onEnable", "doAwake", "doEnable"}) do
+    -- lateUpdateOnActive first: UI2021's own per-frame update. "update" is the one every GUI shares
+    -- (appGuiBehaviorBase), so a hook there ran for every GUI on screen, about 17 times a frame (2026-11-08)
+    for _, mname in ipairs({"lateUpdateOnActive", "update", "lateUpdate", "onEnable", "doAwake", "doEnable"}) do
         if _ui2021_hooked then break end
         local meth = _ui2021_td:get_method(mname)
         if meth then
@@ -1657,12 +1786,14 @@ if _ui2021_td then
 end
 
 local function apply_all_now()
+    if NATIVE.on then NATIVE.sync(); return 1 end      -- the DLL applies them when it reads the file
     has_applied = false
     local count = apply_edits()
     if count > 0 then has_applied = true end
     return count
 end
 
+if not NATIVE.on then -- (the DLL applies the catalog edits)
 re.on_pre_application_entry("LockScene", function()
     if has_applied then return end
     if not sdk.get_primary_camera() then
@@ -1680,9 +1811,10 @@ re.on_pre_application_entry("LockScene", function()
         end
     end
 end)
+end
 
 local sm_type = sdk.find_type_definition("via.SceneManager")
-if sm_type then
+if sm_type and not NATIVE.on then -- (the DLL resets on a scene change)
     local m = sm_type:get_method("begin_change_sceneByString")
     if m then
         sdk.hook(m,
@@ -1829,8 +1961,10 @@ re.on_draw_ui(function()
             imgui.set_tooltip("Keep disabled to prevent the animation from interrupting shots when using high ROF")
         end
         if regrip_changed then
+            if NATIVE.on then NATIVE.sync() else
             set_regrip_condition_enabled(not rof_settings.disable_regrip)
             _regrip_last_updater_addr = get_current_updater_addr()
+            end
             save_settings()
             ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled" or "enabled")
         end
@@ -1874,6 +2008,7 @@ re.on_draw_ui(function()
             imgui.set_tooltip("Prevent cycling fire modes with the hotkey")
         end
         if sf_changed then
+            NATIVE.sync()
             save_settings()
             ui_state.status = "Select fire " .. (rof_settings.disable_select_fire and "disabled" or "enabled")
         end
@@ -1884,7 +2019,8 @@ re.on_draw_ui(function()
             imgui.set_tooltip("Master switch for per-weapon Recoil Animation Force/Speed overrides")
         end
         if rao_changed then
-            if not rof_settings.enable_recoil_anim_override then
+            NATIVE.sync()
+            if not rof_settings.enable_recoil_anim_override and not NATIVE.on then
                 pcall(function()
                     local layer = get_body_add_ctrl_layer()
                     if layer then
@@ -1912,6 +2048,7 @@ re.on_draw_ui(function()
                 for _, e in pairs(rof_edits) do
                     if e then e.smooth_semi = nil end
                 end
+                NATIVE.sync("kill_semi")
                 if smooth_semi.active then
                     smooth_semi.active = false
                     smooth_semi.display_mode = nil
@@ -1922,6 +2059,7 @@ re.on_draw_ui(function()
                     end
                 end
             end
+            if rof_settings.smooth_semi_auto then NATIVE.sync() end
             ui_state.status = "Smooth Semi-Auto " .. (rof_settings.smooth_semi_auto and "enabled" or "disabled")
         end
 
@@ -1938,6 +2076,7 @@ re.on_draw_ui(function()
                 for _, e in pairs(rof_edits) do
                     if e then e.smooth_burst = nil end
                 end
+                NATIVE.sync("kill_burst")
                 if smooth_burst.active then
                     smooth_burst.active = false
                     smooth_burst.display_mode = nil
@@ -1948,6 +2087,7 @@ re.on_draw_ui(function()
                     end
                 end
             end
+            if rof_settings.smooth_burst then NATIVE.sync() end
             ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
         end
 
@@ -2141,6 +2281,8 @@ re.on_draw_ui(function()
                 local dis_changed, dis_new = imgui.checkbox("Disable All Modifications##pw_dis", edit.disabled or false)
                 if dis_changed then
                     if dis_new then
+                        NATIVE.sync("kill_semi")
+                        NATIVE.sync("kill_burst")
                         if smooth_semi.active then
                             smooth_semi.active = false
                             smooth_semi.display_mode = nil
@@ -2240,6 +2382,7 @@ re.on_draw_ui(function()
                 if not edit.allow_semi and not edit.allow_full and not edit.allow_burst then
                     edit.allow_semi = true
                 end
+                if sc or fc or bc then NATIVE.sync() end
             end
         end
 
@@ -2290,6 +2433,7 @@ re.on_draw_ui(function()
                         end
                         if pss_changed then
                             edit.smooth_semi = pw_semi
+                            NATIVE.sync(not pw_semi and "kill_semi" or nil)
                             if not pw_semi and smooth_semi.active then
                                 smooth_semi.active = false
                                 smooth_semi.display_mode = nil
@@ -2314,6 +2458,7 @@ re.on_draw_ui(function()
                         end
                         if psb_changed then
                             edit.smooth_burst = pw_burst
+                            NATIVE.sync(not pw_burst and "kill_burst" or nil)
                             if not pw_burst and smooth_burst.active then
                                 smooth_burst.active = false
                                 smooth_burst.display_mode = nil
@@ -2386,7 +2531,7 @@ re.on_draw_ui(function()
                 if lock_new then
                     if not rof_edits[wkey].recoil_anim_force then rof_edits[wkey].recoil_anim_force = br end
                     if not rof_edits[wkey].recoil_anim_speed then rof_edits[wkey].recoil_anim_speed = spd end
-                else
+                elseif not NATIVE.on then
                     pcall(function()
                         bac_layer:call("set_BlendRate", 1.0)
                         bac_layer:call("set_Speed", 1.0)
@@ -2396,6 +2541,7 @@ re.on_draw_ui(function()
                 ra_enabled = lock_new
                 ra_force = rof_edits[wkey].recoil_anim_force or 1.0
                 ra_speed = rof_edits[wkey].recoil_anim_speed or 1.0
+                NATIVE.sync()
             end
 
             if ra_enabled then
@@ -2403,16 +2549,20 @@ re.on_draw_ui(function()
             if br_changed and wkey then
                 if not rof_edits[wkey] then rof_edits[wkey] = {} end
                 rof_edits[wkey].recoil_anim_force = br_new
+                if NATIVE.on then NATIVE.sync() else
                 pcall(function() bac_layer:call("set_BlendRate", br_new) end)
                 _recoil_anim_layer_custom = true
+                end
             end
 
             local spd_changed, spd_new = imgui.drag_float("Recoil Animation Speed", ra_speed, 0.1, 0.0, 100.0)
             if spd_changed and wkey then
                 if not rof_edits[wkey] then rof_edits[wkey] = {} end
                 rof_edits[wkey].recoil_anim_speed = spd_new
+                if NATIVE.on then NATIVE.sync() else
                 pcall(function() bac_layer:call("set_Speed", spd_new) end)
                 _recoil_anim_layer_custom = true
+                end
             end
             end
         else
@@ -2434,19 +2584,27 @@ re.on_draw_ui(function()
                     { label = "Translation Z", field = "_TranslationZRange", sk = "tz_s", rk = "tz_r" },
                 }
                 local scsm_changed = false
+                -- with the DLL: it writes the catalog from the edit, so the sliders show the edit's values once it has them
+                local kept = NATIVE.on and wkey and rof_edits[wkey] and rof_edits[wkey].shot_camera_shake_move
+                local pend = {}
                 for _, axis in ipairs(axes) do
                     local range_val = try_field(move, axis.field)
                     if range_val then
                         local mn = tonumber(range_val.s) or 0
                         local mx = tonumber(range_val.r) or 0
+                        if kept and kept[axis.sk] ~= nil then mn = kept[axis.sk] end
+                        if kept and kept[axis.rk] ~= nil then mx = kept[axis.rk] end
                         local c1, new_min = imgui.drag_float(axis.label .. " Min", mn, 0.001, -10.0, 10.0, "%.4f")
                         local c2, new_max = imgui.drag_float(axis.label .. " Max", mx, 0.001, -10.0, 10.0, "%.4f")
+                        pend[axis.sk], pend[axis.rk] = c1 and new_min or mn, c2 and new_max or mx
                         if c1 or c2 then
+                            if not NATIVE.on then
                             range_val.s = c1 and new_min or mn
                             range_val.r = c2 and new_max or mx
                             local f = move_type:get_field(axis.field)
                             if f then
                                 write_valuetype(move, f:get_offset_from_base(), range_val)
+                            end
                             end
                             scsm_changed = true
                         end
@@ -2457,7 +2615,8 @@ re.on_draw_ui(function()
                 if scsm_changed and wkey then
                     local edit = rof_edits[wkey]
                     if not edit then edit = {}; rof_edits[wkey] = edit end
-                    edit.shot_camera_shake_move = read_shot_camera_shake_move(wd)
+                    edit.shot_camera_shake_move = NATIVE.on and pend or read_shot_camera_shake_move(wd)
+                    NATIVE.sync()
                 end
             else
                 imgui.text("No ShotCameraShakeParam._Move found")
@@ -2584,12 +2743,14 @@ re.on_draw_ui(function()
             show_fire_mode_overlay = rof_settings.overlay_style > 0
             rof_settings.show_fire_mode_overlay = show_fire_mode_overlay
             rof_settings.overlay_use_rects = rof_settings.overlay_style == 2
+            NATIVE.sync()
             save_settings()
         end
 
         local always_changed, always_new = imgui.checkbox("Always Show (when HUD active)", rof_settings.overlay_always_show)
         if always_changed then
             rof_settings.overlay_always_show = always_new
+            NATIVE.sync()
             save_settings()
         end
 
@@ -2644,27 +2805,40 @@ local sv_typedef = sdk.find_type_definition("via.SceneView")
 
 re.on_frame(function()
     if not show_fire_mode_overlay then return end
+    if NATIVE.on and (NATIVE.flags() & 8) ~= 0 then return end      -- the DLL draws it
 
+    local current = nil
+    if NATIVE.on then
+        if (NATIVE.flags() & 3) ~= 3 then return end
+        current = NATIVE.mode() or NATIVE.shot_type()
+        if current == nil then return end
+    else
     local eid_str, pe = get_equipped_weapon_id_cached()
     if not pe or not eid_str then return end
     if not WEAPON_NAMES[eid_str] then return end
 
-    local current = nil
     pcall(function() current = pe:get_field("_EquipShotType") end)
     if current == nil then return end
     current = smooth_get_display_mode() or tonumber(current) or 0
+    end
 
     if last_displayed_mode ~= current then
         fire_mode_display_timer = os.clock()
         last_displayed_mode = current
     end
 
-    local gui_active_now = rof_settings.overlay_always_show and is_game_gui_active()
+    local gui_active_now = rof_settings.overlay_always_show
+        and (NATIVE.on and (NATIVE.flags() & 4) ~= 0 or not NATIVE.on and is_game_gui_active())
     if gui_active_now and not gui_was_active then
         gui_became_active_at = os.clock()
     end
     gui_was_active = gui_active_now
     local always_on = gui_active_now and (os.clock() - gui_became_active_at >= 0.1)
+    -- only with the game HUD (not on a loading screen)
+    if not (NATIVE.on and (NATIVE.flags() & 4) ~= 0 or not NATIVE.on and is_game_gui_active()) then return end
+    -- the game's HUD sits under its screen fade, this overlay on top: none while the screen is faded out
+    local fade = sdk.get_managed_singleton("app.FadeManager")
+    if fade and fade:call("isAnyFadeOut") == true then return end
     if not always_on and os.clock() - fire_mode_display_timer > fire_mode_display_duration then return end
 
     local dot_count = 0
