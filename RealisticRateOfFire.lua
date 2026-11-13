@@ -12,6 +12,7 @@ local rof_resolve_effective_weapon_key, rof_get_edit_or_fallback
 
 local rof_settings_defaults = {
     disable_regrip = true,
+    regrip_mode = -1,          -- 0 on, 1 off, 2 on but not while shooting (RealisticRateOfFire.dll); -1: from disable_regrip
     disable_select_fire = false,
     smooth_semi_auto = true,
     smooth_burst = true,
@@ -36,6 +37,10 @@ do
     else
         for k, v in pairs(rof_settings_defaults) do rof_settings[k] = v end
     end
+end
+
+if rof_settings.regrip_mode == -1 or rof_settings.regrip_mode == nil then
+    rof_settings.regrip_mode = rof_settings.disable_regrip and 1 or 0
 end
 
 local function save_settings()
@@ -178,6 +183,7 @@ NATIVE.sync = function(op, extra)
         nonce = NATIVE.nonce,
         settings = {
             disable_regrip = rof_settings.disable_regrip,
+            regrip_mode = rof_settings.regrip_mode,
             disable_select_fire = rof_settings.disable_select_fire,
             smooth_semi_auto = rof_settings.smooth_semi_auto,
             smooth_burst = rof_settings.smooth_burst,
@@ -1956,9 +1962,25 @@ re.on_draw_ui(function()
         end
 
         local regrip_changed = false
-        regrip_changed, rof_settings.disable_regrip = imgui.checkbox("Disable Regrip Animation", rof_settings.disable_regrip)
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("Keep disabled to prevent the animation from interrupting shots when using high ROF")
+        if NATIVE.on then
+            -- (the DLL can hold regrip back only while shooting: from a shot until the trigger is up and the recoil is done)
+            local regrip_idx
+            regrip_changed, regrip_idx = imgui.combo("Regrip Animation", (rof_settings.regrip_mode or 0) + 1,
+                { "On", "Off", "On, but not while shooting" })
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Off keeps the animation from interrupting shots when using high ROF.\n"
+                    .. "\"On, but not while shooting\" lets it play between bursts, after the recoil animation is done")
+            end
+            if regrip_changed then
+                rof_settings.regrip_mode = regrip_idx - 1
+                rof_settings.disable_regrip = rof_settings.regrip_mode == 1
+            end
+        else
+            regrip_changed, rof_settings.disable_regrip = imgui.checkbox("Disable Regrip Animation", rof_settings.disable_regrip)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Keep disabled to prevent the animation from interrupting shots when using high ROF")
+            end
+            if regrip_changed then rof_settings.regrip_mode = rof_settings.disable_regrip and 1 or 0 end
         end
         if regrip_changed then
             if NATIVE.on then NATIVE.sync() else
@@ -1966,7 +1988,8 @@ re.on_draw_ui(function()
             _regrip_last_updater_addr = get_current_updater_addr()
             end
             save_settings()
-            ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled" or "enabled")
+            ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled"
+                or rof_settings.regrip_mode == 2 and "enabled, not while shooting" or "enabled")
         end
         -- do
         --     local dbg = "updater=" .. tostring(_regrip_last_updater_addr or "(nil)")
