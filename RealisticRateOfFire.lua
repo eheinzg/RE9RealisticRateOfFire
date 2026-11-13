@@ -23,6 +23,8 @@ local rof_settings_defaults = {
     overlay_use_rects = false,
     overlay_style = 3,
     overlay_always_show = true,
+    overlay_hk_color = 0x66FFFFFF,   -- the H&K style's color, 0xAABBGGRR (Default: the overlay's faint white)
+    layer_recoil = true,             -- semi-auto and burst recoil blends like full-auto (RealisticRateOfFire.dll)
     active_profile = "",
     deleted_profiles = {},
 }
@@ -194,6 +196,8 @@ NATIVE.sync = function(op, extra)
             overlay_use_rects = rof_settings.overlay_use_rects,
             overlay_always_show = rof_settings.overlay_always_show,
             overlay_style = rof_settings.overlay_style,
+            overlay_hk_color = rof_settings.overlay_hk_color,
+            layer_recoil = rof_settings.layer_recoil,
         },
         known = known,
         edits = rof_edits,
@@ -2114,6 +2118,20 @@ re.on_draw_ui(function()
             ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
         end
 
+        if NATIVE.on then
+            local lr_changed
+            lr_changed, rof_settings.layer_recoil = imgui.checkbox("Layered Semi-Auto and Burst Recoil", rof_settings.layer_recoil)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Semi-auto and burst shots blend into the last shot's recoil like full-auto does,\n"
+                    .. "instead of restarting it (the game's own semi-auto and burst modes, no fire-mode workaround)")
+            end
+            if lr_changed then
+                NATIVE.sync()
+                save_settings()
+                ui_state.status = "Layered recoil " .. (rof_settings.layer_recoil and "enabled" or "disabled")
+            end
+        end
+
         imgui.tree_pop()
         end
 
@@ -2768,6 +2786,22 @@ re.on_draw_ui(function()
             rof_settings.overlay_use_rects = rof_settings.overlay_style == 2
             NATIVE.sync()
             save_settings()
+        end
+
+        if rof_settings.overlay_style == 4 then
+            local hk_changed, hk_new = imgui.color_edit("H&K Color", rof_settings.overlay_hk_color)
+            if imgui.is_item_hovered() then
+                imgui.set_tooltip("Color and opacity of the H&K pictograms")
+            end
+            imgui.same_line()
+            if imgui.button("Default##hk_color") then
+                hk_changed, hk_new = true, rof_settings_defaults.overlay_hk_color
+            end
+            if hk_changed then
+                rof_settings.overlay_hk_color = hk_new
+                NATIVE.sync()
+                save_settings()
+            end
         end
 
         local always_changed, always_new = imgui.checkbox("Always Show (when HUD active)", rof_settings.overlay_always_show)

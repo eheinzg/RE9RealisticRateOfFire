@@ -13,7 +13,19 @@
 -- while the hold is on. Everything else takes the game's answer. First person never gets here:
 -- updateApplyHoldFront leaves early in that view.
 
-local LENGTH_MARGIN = 0.3     -- reaches anything the game's check touched at its far end
+-- SmallScripts.dll does this hook natively when it is loaded; this script then keeps only the readout, from the DLL's
+-- NoShortHoldAtNPCs_Status.json (read twice a second while the menu is open).
+local NATIVE = { on = false, read_t = -10 }
+pcall(function()
+    local d = json.load_file("SmallScripts_Loaded.json")
+    if type(d) ~= "table" or type(d.t) ~= "number" then return end
+    local up = sdk.call_native_func(sdk.get_native_singleton("via.Application"),
+        sdk.find_type_definition("via.Application"), "get_UpTimeSecond")
+    NATIVE.on = d.t >= os.time() - (tonumber(up) or 0) - 120
+end)
+log.info("[No Short Hold At NPCs] game work: " .. (NATIVE.on and "SmallScripts.dll" or "this script"))
+
+local LENGTH_MARGIN = 0.3    -- reaches anything the game's check touched at its far end
 local WALL_CHECK_START = 0.15 -- the game starts its wall check this far along the aim
 local DEFAULT_WALL_LENGTH, DEFAULT_WALL_RADIUS = 0.3, 0.2
 
@@ -127,7 +139,7 @@ local function keep_reason(drv)
     return nil
 end
 
-sdk.hook(hold_td:get_method("isApplyHoldFrontInternal"),
+if not NATIVE.on then sdk.hook(hold_td:get_method("isApplyHoldFrontInternal"),
     function(args)
         local storage = thread.get_hook_storage()
         if not storage then return end
@@ -152,10 +164,20 @@ sdk.hook(hold_td:get_method("isApplyHoldFrontInternal"),
         seen.blocked = seen.blocked + 1
         drv:set_field("_IsNearHitWallHoldFront", false)
         return sdk.to_ptr(0)
-    end)
+    end) end
 
 re.on_draw_ui(function()
     if not imgui.tree_node("No Short Hold At NPCs") then return end
+    if NATIVE.on and os.clock() - NATIVE.read_t > 0.5 then
+        NATIVE.read_t = os.clock()
+        local s = json.load_file("NoShortHoldAtNPCs_Status.json")
+        if type(s) == "table" then
+            seen.last = tostring(s.last or seen.last)
+            seen.game_yes = tonumber(s.game_yes) or seen.game_yes
+            seen.blocked = tonumber(s.blocked) or seen.blocked
+            seen.error = (s.error ~= nil and s.error ~= "") and tostring(s.error) or nil
+        end
+    end
     imgui.text("Last: " .. seen.last)
     imgui.text(string.format("Game asked for the hold %d times, blocked %d", seen.game_yes, seen.blocked))
     if seen.error then imgui.text("Error: " .. seen.error) end
