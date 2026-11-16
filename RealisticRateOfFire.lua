@@ -25,6 +25,7 @@ local rof_settings_defaults = {
     overlay_always_show = true,
     overlay_hk_color = 0x66FFFFFF,   -- the H&K style's color, 0xAABBGGRR (Default: the overlay's faint white)
     layer_recoil = true,             -- semi-auto and burst recoil blends like full-auto (RealisticRateOfFire.dll)
+    debug_log = false,               -- our info lines in the REFramework log (and the DLL's shot probe): off in normal play
     active_profile = "",
     deleted_profiles = {},
 }
@@ -198,6 +199,7 @@ NATIVE.sync = function(op, extra)
             overlay_style = rof_settings.overlay_style,
             overlay_hk_color = rof_settings.overlay_hk_color,
             layer_recoil = rof_settings.layer_recoil,
+            debug_log = rof_settings.debug_log,
         },
         known = known,
         edits = rof_edits,
@@ -2132,6 +2134,16 @@ re.on_draw_ui(function()
             end
         end
 
+        local dl_changed
+        dl_changed, rof_settings.debug_log = imgui.checkbox("Debug log", rof_settings.debug_log)
+        if imgui.is_item_hovered() then
+            imgui.set_tooltip("Write this mod's info lines to the REFramework log (errors are always written)")
+        end
+        if dl_changed then
+            NATIVE.sync()
+            save_settings()
+        end
+
         imgui.tree_pop()
         end
 
@@ -2896,6 +2908,10 @@ re.on_frame(function()
     -- the game's HUD sits under its screen fade, this overlay on top: none while the screen is faded out
     local fade = sdk.get_managed_singleton("app.FadeManager")
     if fade and fade:call("isAnyFadeOut") == true then return end
+    -- nor on the game over screen, which Mercenaries' results sit on (the HUD is skipped from drawing there, but the game
+    -- still counts it as drawn)
+    local game_over = sdk.get_managed_singleton("app.GameOverManager")
+    if game_over and game_over:get_field("_GameOverHandle") ~= nil then return end
     if not always_on and os.clock() - fire_mode_display_timer > fire_mode_display_duration then return end
 
     local dot_count = 0

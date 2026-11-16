@@ -23,7 +23,13 @@ pcall(function()
         sdk.find_type_definition("via.Application"), "get_UpTimeSecond")
     NATIVE.on = d.t >= os.time() - (tonumber(up) or 0) - 120
 end)
-log.info("[No Short Hold At NPCs] game work: " .. (NATIVE.on and "SmallScripts.dll" or "this script"))
+-- our info lines in the REFramework log, off by default; saved in NoShortHoldAtNPCs.json (SmallScripts.dll reads it too)
+NATIVE.debug_log = false
+pcall(function()
+    local d = json.load_file("NoShortHoldAtNPCs.json")
+    if type(d) == "table" and type(d.debug_log) == "boolean" then NATIVE.debug_log = d.debug_log end
+end)
+if NATIVE.debug_log then log.info("[No Short Hold At NPCs] game work: " .. (NATIVE.on and "SmallScripts.dll" or "this script")) end
 
 local LENGTH_MARGIN = 0.3    -- reaches anything the game's check touched at its far end
 local WALL_CHECK_START = 0.15 -- the game starts its wall check this far along the aim
@@ -177,6 +183,11 @@ re.on_draw_ui(function()
             seen.blocked = tonumber(s.blocked) or seen.blocked
             seen.error = (s.error ~= nil and s.error ~= "") and tostring(s.error) or nil
         end
+    end
+    local changed, v = imgui.checkbox("Debug log", NATIVE.debug_log)
+    if changed then
+        NATIVE.debug_log = v
+        pcall(json.dump_file, "NoShortHoldAtNPCs.json", { debug_log = v })
     end
     imgui.text("Last: " .. seen.last)
     imgui.text(string.format("Game asked for the hold %d times, blocked %d", seen.game_yes, seen.blocked))
