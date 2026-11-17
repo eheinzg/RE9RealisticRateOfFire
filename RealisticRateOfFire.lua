@@ -1263,8 +1263,7 @@ local function draw_menu(W)
                 current_type = smooth_get_display_mode() or tonumber(current_type) or 0
                 eid_name = eid_name .. " (" .. (FIRE_MODE_NAMES[current_type] or "?") .. ")"
             end
-            -- (not in Mercenaries' Extras: user, "remove the equipped line from the extra menu for realistic rate of fire")
-            if not W.merc then W.value("Equipped", eid_name) end
+            -- (no Equipped line in any menu: user, "dont show the equipped or current weapon stat in the menus")
 
             -- Auto-select weapon row when equip id, stock, or character context changes
             local sig_now = rof_equip_context_signature()
@@ -1282,7 +1281,6 @@ local function draw_menu(W)
                 last_equip_context_sig = sig_now
             end
         else
-            if not W.merc then W.value("Equipped", "(waiting...)") end
         end
 
         changed, selected_index = W.combo("Weapon##rrof_weapon", selected_index, dropdown_options)
