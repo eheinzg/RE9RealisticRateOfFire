@@ -1146,101 +1146,6 @@ local function draw_menu(W)
         end
     end)
 
-    W.card("options", "Advanced Options", function()
-        local acs_changed = false
-        acs_changed, ui_state.enable_aim_camera_shake = W.check("Enable Aim Camera Shake", ui_state.enable_aim_camera_shake,
-            "Toggle the camera shake effect when aiming")
-        if acs_changed then
-            apply_all_now()
-            rof_settings.enable_aim_camera_shake = ui_state.enable_aim_camera_shake
-            save_settings()
-            ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
-        end
-
-        -- On = the DLL's "not while shooting" (regrip_mode 2: held back from a shot until the trigger is up and the recoil is
-        -- done), Off = 1 (user: "rename the regrip anmation option called on, but not while shooting. change it to just On and
-        -- remove the old On option"; the old always-on mode 0 is read as On)
-        local regrip_changed, regrip_idx = W.combo("Regrip Animation", rof_settings.regrip_mode == 1 and 2 or 1, { "On", "Off" },
-            "On plays it between shots, after the recoil animation is done. Off keeps it from interrupting shots when using high ROF")
-        if regrip_changed then
-            rof_settings.regrip_mode = regrip_idx == 2 and 1 or 2
-            rof_settings.disable_regrip = rof_settings.regrip_mode == 1
-            NATIVE.sync()
-            save_settings()
-            ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled" or "enabled")
-        end
-
-        local sf_changed
-        sf_changed, rof_settings.disable_select_fire = W.check("Disable Select Fire", rof_settings.disable_select_fire,
-            "Prevent cycling fire modes with the hotkey")
-        if sf_changed then
-            NATIVE.sync()
-            save_settings()
-            ui_state.status = "Select fire " .. (rof_settings.disable_select_fire and "disabled" or "enabled")
-        end
-
-        local rao_changed
-        rao_changed, rof_settings.enable_recoil_anim_override = W.check("Enable Recoil Animation Override",
-            rof_settings.enable_recoil_anim_override, "Master switch for per-weapon Recoil Animation Force/Speed overrides")
-        if rao_changed then
-            NATIVE.sync()
-            save_settings()
-            ui_state.status = "Recoil animation override " .. (rof_settings.enable_recoil_anim_override and "enabled" or "disabled")
-        end
-
-        local ssa_changed
-        ssa_changed, rof_settings.smooth_semi_auto = W.check("Improved Semi-Auto Recoil Animation", rof_settings.smooth_semi_auto,
-            "Global default for Improved Semi-Auto so that shots layer properly (can be overridden per weapon)")
-        if ssa_changed then
-            save_settings()
-            if not rof_settings.smooth_semi_auto then
-                for _, e in pairs(rof_edits) do
-                    if e then e.smooth_semi = nil end
-                end
-                NATIVE.sync("kill_semi")
-            else
-                NATIVE.sync()
-            end
-            ui_state.status = "Smooth Semi-Auto " .. (rof_settings.smooth_semi_auto and "enabled" or "disabled")
-        end
-
-        local sb_changed
-        sb_changed, rof_settings.smooth_burst = W.check("Improved Burst Recoil Animation", rof_settings.smooth_burst,
-            "Global default for Improved Burst so that shots layer properly (can be overridden per weapon)")
-        if sb_changed then
-            save_settings()
-            if not rof_settings.smooth_burst then
-                for _, e in pairs(rof_edits) do
-                    if e then e.smooth_burst = nil end
-                end
-                NATIVE.sync("kill_burst")
-            else
-                NATIVE.sync()
-            end
-            ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
-        end
-
-        -- (hidden for now, user: "comment out the layerd sem-auto and burst recouil option for now"; the saved setting still
-        -- goes to the DLL)
-        -- local lr_changed
-        -- lr_changed, rof_settings.layer_recoil = W.check("Layered Semi-Auto and Burst Recoil", rof_settings.layer_recoil,
-        --     "Semi-auto and burst shots blend into the last shot's recoil like full-auto does,\n"
-        --         .. "instead of restarting it (the game's own semi-auto and burst modes, no fire-mode workaround)")
-        -- if lr_changed then
-        --     NATIVE.sync()
-        --     save_settings()
-        --     ui_state.status = "Layered recoil " .. (rof_settings.layer_recoil and "enabled" or "disabled")
-        -- end
-
-        local dl_changed
-        dl_changed, rof_settings.debug_log = W.check("Debug log##rrof_debug_log", rof_settings.debug_log,
-            "Write this mod's info lines to the REFramework log (errors are always written)")
-        if dl_changed then
-            NATIVE.sync()
-            save_settings()
-        end
-    end, true)
-
     -- the weapon picked in the list, its settings in the cards below
     local any_changed = false
     local weapon_disabled = false
@@ -1684,6 +1589,102 @@ local function draw_menu(W)
             json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
         end
     end)
+
+    -- (Advanced Options last, below Hotkeys; user: "for realistic rate of fire move advanced options below hotkeys")
+    W.card("options", "Advanced Options", function()
+        local acs_changed = false
+        acs_changed, ui_state.enable_aim_camera_shake = W.check("Enable Aim Camera Shake", ui_state.enable_aim_camera_shake,
+            "Toggle the camera shake effect when aiming")
+        if acs_changed then
+            apply_all_now()
+            rof_settings.enable_aim_camera_shake = ui_state.enable_aim_camera_shake
+            save_settings()
+            ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
+        end
+
+        -- On = the DLL's "not while shooting" (regrip_mode 2: held back from a shot until the trigger is up and the recoil is
+        -- done), Off = 1 (user: "rename the regrip anmation option called on, but not while shooting. change it to just On and
+        -- remove the old On option"; the old always-on mode 0 is read as On)
+        local regrip_changed, regrip_idx = W.combo("Regrip Animation", rof_settings.regrip_mode == 1 and 2 or 1, { "On", "Off" },
+            "On plays it between shots, after the recoil animation is done. Off keeps it from interrupting shots when using high ROF")
+        if regrip_changed then
+            rof_settings.regrip_mode = regrip_idx == 2 and 1 or 2
+            rof_settings.disable_regrip = rof_settings.regrip_mode == 1
+            NATIVE.sync()
+            save_settings()
+            ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled" or "enabled")
+        end
+
+        local sf_changed
+        sf_changed, rof_settings.disable_select_fire = W.check("Disable Select Fire", rof_settings.disable_select_fire,
+            "Prevent cycling fire modes with the hotkey")
+        if sf_changed then
+            NATIVE.sync()
+            save_settings()
+            ui_state.status = "Select fire " .. (rof_settings.disable_select_fire and "disabled" or "enabled")
+        end
+
+        local rao_changed
+        rao_changed, rof_settings.enable_recoil_anim_override = W.check("Enable Recoil Animation Override",
+            rof_settings.enable_recoil_anim_override, "Master switch for per-weapon Recoil Animation Force/Speed overrides")
+        if rao_changed then
+            NATIVE.sync()
+            save_settings()
+            ui_state.status = "Recoil animation override " .. (rof_settings.enable_recoil_anim_override and "enabled" or "disabled")
+        end
+
+        local ssa_changed
+        ssa_changed, rof_settings.smooth_semi_auto = W.check("Improved Semi-Auto Recoil Animation", rof_settings.smooth_semi_auto,
+            "Global default for Improved Semi-Auto so that shots layer properly (can be overridden per weapon)")
+        if ssa_changed then
+            save_settings()
+            if not rof_settings.smooth_semi_auto then
+                for _, e in pairs(rof_edits) do
+                    if e then e.smooth_semi = nil end
+                end
+                NATIVE.sync("kill_semi")
+            else
+                NATIVE.sync()
+            end
+            ui_state.status = "Smooth Semi-Auto " .. (rof_settings.smooth_semi_auto and "enabled" or "disabled")
+        end
+
+        local sb_changed
+        sb_changed, rof_settings.smooth_burst = W.check("Improved Burst Recoil Animation", rof_settings.smooth_burst,
+            "Global default for Improved Burst so that shots layer properly (can be overridden per weapon)")
+        if sb_changed then
+            save_settings()
+            if not rof_settings.smooth_burst then
+                for _, e in pairs(rof_edits) do
+                    if e then e.smooth_burst = nil end
+                end
+                NATIVE.sync("kill_burst")
+            else
+                NATIVE.sync()
+            end
+            ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
+        end
+
+        -- (hidden for now, user: "comment out the layerd sem-auto and burst recouil option for now"; the saved setting still
+        -- goes to the DLL)
+        -- local lr_changed
+        -- lr_changed, rof_settings.layer_recoil = W.check("Layered Semi-Auto and Burst Recoil", rof_settings.layer_recoil,
+        --     "Semi-auto and burst shots blend into the last shot's recoil like full-auto does,\n"
+        --         .. "instead of restarting it (the game's own semi-auto and burst modes, no fire-mode workaround)")
+        -- if lr_changed then
+        --     NATIVE.sync()
+        --     save_settings()
+        --     ui_state.status = "Layered recoil " .. (rof_settings.layer_recoil and "enabled" or "disabled")
+        -- end
+
+        local dl_changed
+        dl_changed, rof_settings.debug_log = W.check("Debug log##rrof_debug_log", rof_settings.debug_log,
+            "Write this mod's info lines to the REFramework log (errors are always written)")
+        if dl_changed then
+            NATIVE.sync()
+            save_settings()
+        end
+    end, true)
 end
 
 re.on_draw_ui(function()
