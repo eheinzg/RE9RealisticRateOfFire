@@ -1009,693 +1009,660 @@ local function reset_weapon_edits_from_defaults(key, keep_disabled)
     return true
 end
 
--- The menu, drawn through W: REFramework's menu (W_IMGUI below) or another mod's window, which hands over its own rows
--- (Mercenaries' Extras: _G.RealisticRateOfFire.draw_menu(W)). Every control sits in a W.card. W's calls:
+-- The menu, drawn through W: the Gameplay Enhancements window's own rows (Mercenaries' or EnhancementsMenu/menu.lua's;
+-- REFramework's old menu is gone, user: "delete them"), _G.RealisticRateOfFire.draw_menu(W). Every control sits in a W.card. W's calls:
 --   card(id, title, fill, closed)  check(label, v, tip)  combo(label, idx, names, tip)  float(label, v, speed, lo, hi, fmt, tip)
 --   button(label, text, tip)  same_line()  text(s, color)  value(label, value)  input(label, s, tip)  color(label, col, tip)
 --   W.merc: keys(rows), rows = { { name, keyboard action, pad action }, ... }
-local W_IMGUI = {}
-function W_IMGUI.card(id, title, fill, closed)
-    if closed then
-        if imgui.tree_node(title .. "##rrof_" .. id) then
-            fill()
-            imgui.tree_pop()
-        end
-        return
-    end
-    fill()
-    imgui.separator()
-end
-local function imgui_tip(tip) if tip and imgui.is_item_hovered() then imgui.set_tooltip(tip) end end
-function W_IMGUI.check(label, v, tip)
-    local c, nv = imgui.checkbox(label, v)
-    imgui_tip(tip)
-    return c, nv
-end
-function W_IMGUI.combo(label, idx, names, tip)
-    local c, nv = imgui.combo(label, idx, names)
-    imgui_tip(tip)
-    return c, nv
-end
-function W_IMGUI.float(label, v, speed, lo, hi, fmt, tip)
-    local c, nv = imgui.drag_float(label, v, speed, lo, hi, fmt)
-    imgui_tip(tip)
-    return c, nv
-end
-function W_IMGUI.button(label, text, tip)
-    local _, id = label:match("^(.-)##(.*)$")
-    local pressed = imgui.button((text or label) .. "##" .. (id or label))
-    imgui_tip(tip)
-    return pressed
-end
-function W_IMGUI.same_line() imgui.same_line() end
-function W_IMGUI.text(s, color) imgui.text_colored(s, color or 0xFFFFFFFF) end
-function W_IMGUI.value(label, value) imgui.text_colored(label .. ": " .. value, 0xFFFFFF00) end
-function W_IMGUI.input(label, s, tip)
-    local c, nv = imgui.input_text(label, s)
-    imgui_tip(tip)
-    return c, nv
-end
-function W_IMGUI.color(label, col, tip)
-    local c, nv = imgui.color_edit(label, col)
-    imgui_tip(tip)
-    return c, nv
-end
-
-local function draw_menu(W)
+local function draw_menu(W, sub)
+    -- (a sub tab's cards only, when the window gives one: user, "update rate of Fire menu to utilize the submenu for better
+    -- navigation"; with none, every card)
+    local function show(id) return sub == nil or sub == id end
     local changed
 
-    W.card("main", "Realistic Rate of Fire", function()
-        if not NATIVE.on then
-            W.text("RealisticRateOfFire.dll is not loaded: these settings change nothing in the game", 0xFF4444FF)
-        end
-        -- the mod as a whole (user: "add an on of switch for teh realistic rate of fire as a whole so it completely disables
-        -- the mod"): off, the DLL does no game work and puts back the game's own values it changed
-        local en_changed
-        en_changed, rof_settings.enabled = W.check("Realistic Rate of Fire##rrof_enabled", rof_settings.enabled ~= false,
-            "Enable realistic rates of fire for each weapon")
-        if en_changed then
-            NATIVE.sync()
-            save_settings()
-            ui_state.status = "Realistic Rate of Fire " .. (rof_settings.enabled and "on" or "off")
-        end
-        if not W.merc then
-            W.text("Toggle Fire Mode With Assigned Hotkey (Default: B or L2(Left Trigger)+A(X))", 0xFFFFFF00)
-        end
+    if show("general") then
+        W.card("main", "Realistic Rate of Fire", function()
+            if not NATIVE.on then
+                W.text("RealisticRateOfFire.dll is not loaded: these settings change nothing in the game", 0xFF4444FF)
+            end
+            -- the mod as a whole (user: "add an on of switch for teh realistic rate of fire as a whole so it completely disables
+            -- the mod"): off, the DLL does no game work and puts back the game's own values it changed
+            local en_changed
+            en_changed, rof_settings.enabled = W.check("Realistic Rate of Fire##rrof_enabled", rof_settings.enabled ~= false,
+                "Enable realistic rates of fire for each weapon")
+            if en_changed then
+                NATIVE.sync()
+                save_settings()
+                ui_state.status = "Realistic Rate of Fire " .. (rof_settings.enabled and "on" or "off")
+            end
+            if not W.merc then
+                W.text("Toggle Fire Mode With Assigned Hotkey (Default: B or L2(Left Trigger)+A(X))", 0xFFFFFF00)
+            end
 
-        if #profile_state.names > 0 then
-            local prof_changed
-            prof_changed, profile_state.selected = W.combo("Profile##rrof_profile", profile_state.selected, profile_state.names)
-            if profile_state.selected < 1 then profile_state.selected = 1 end
-            if profile_state.selected > #profile_state.names then profile_state.selected = #profile_state.names end
-            if prof_changed then
-                local pname = profile_state.names[profile_state.selected]
-                if pname and load_profile(pname) then
-                    apply_all_now()
-                    push_live_for_current_equipment()
-                    save_profile_index()
-                    ui_state.status = "Loaded profile: " .. pname
-                end
-            end
-            if W.button("Save the profile##rrof_save", "Save") then
-                local pname = profile_state.names[profile_state.selected]
-                if pname then
-                    save_profile(pname)
-                    ui_state.status = "Profile saved: " .. pname
-                end
-            end
-            W.same_line()
-            if W.button("Delete the profile##rrof_delete", "Delete") then
-                local pname = profile_state.names[profile_state.selected]
-                if pname then
-                    delete_profile(pname)
-                    ui_state.status = "Deleted profile: " .. pname
-                end
-            end
-            W.same_line()
-        end
-        if W.button("New profile##rrof_new", "New Profile") then
-            profile_state.naming = not profile_state.naming
-        end
-        if profile_state.naming then
-            local buf_changed
-            buf_changed, profile_state.name_buf = W.input("Name##rrof_name", profile_state.name_buf)
-            W.same_line()
-            if W.button("Create the profile##rrof_create", "Create") then
-                local safe = sanitize_filename(profile_state.name_buf)
-                if safe ~= "" then
-                    save_profile(safe)
-                    for i, n in ipairs(profile_state.names) do
-                        if n == safe then profile_state.selected = i; break end
-                    end
-                    save_profile_index()
-                    profile_state.name_buf = ""
-                    profile_state.naming = false
-                    ui_state.status = "Profile saved: " .. safe
-                else
-                    ui_state.status = "Enter a profile name"
-                end
-            end
-            if ui_state.status:match("^Enter a profile name") then
-                W.same_line()
-                W.text(ui_state.status, 0xFF00FFFF)
-            end
-        end
-        if ui_state.status:match("^Profile saved:") or ui_state.status:match("^Deleted profile:") then
-            W.text(ui_state.status, ui_state.status:match("^Deleted") and 0xFF5555FF or 0xFF00FF00)
-        end
-    end)
-
-    -- the weapon picked in the list, its settings in the cards below
-    local any_changed = false
-    local weapon_disabled = false
-    W.card("weapon", "Weapon", function()
-        local equipped_key, pe = get_equipped_weapon_id_cached()
-        if pe and equipped_key then
-            local eid_name = WEAPON_NAMES[equipped_key]
-            local is_known = eid_name ~= nil
-            if equipped_key == "arm0400" then
-                eid_name = player_is_leon() and WEAPON_NAMES["arm0400_leon"] or WEAPON_NAMES["arm0400_grace"]
-                is_known = eid_name ~= nil
-            elseif equipped_key == "arm0000" and matilda_stock_attached() then
-                eid_name = WEAPON_NAMES["arm0000_stock"]
-                is_known = true
-            end
-            eid_name = eid_name or equipped_key
-            if is_known then
-                local current_type = 0
-                pcall(function() current_type = pe:get_field("_EquipShotType") end)
-                current_type = smooth_get_display_mode() or tonumber(current_type) or 0
-                eid_name = eid_name .. " (" .. (FIRE_MODE_NAMES[current_type] or "?") .. ")"
-            end
-            -- (no Equipped line in any menu: user, "dont show the equipped or current weapon stat in the menus")
-
-            -- Auto-select weapon row when equip id, stock, or character context changes
-            local sig_now = rof_equip_context_signature()
-            if sig_now and sig_now ~= last_equip_context_sig then
-                local eff = rof_resolve_effective_weapon_key(equipped_key)
-                for i, key in ipairs(dropdown_items) do
-                    if key == eff then
-                        selected_index = i
-                        local vals = rof_edits[key] or rof_defaults[key] or rof_defaults[rof_catalog_id_for_key(key)]
-                            or read_live_values(key)
-                        populate_ui_from_vals(vals, key)
-                        break
-                    end
-                end
-                last_equip_context_sig = sig_now
-            end
-        else
-        end
-
-        changed, selected_index = W.combo("Weapon##rrof_weapon", selected_index, dropdown_options)
-        if selected_index < 1 then selected_index = 1 end
-        if selected_index > #dropdown_items then selected_index = #dropdown_items end
-        if changed then
-            local key = dropdown_items[selected_index]
-            local vals = rof_edits[key] or rof_defaults[key] or rof_defaults[rof_catalog_id_for_key(key)]
-                or read_live_values(key)
-            populate_ui_from_vals(vals, key)
-        end
-
-        local key = dropdown_items[selected_index]
-        if key then
-            local edit = rof_edits[key]
-            if not edit then edit = {}; rof_edits[key] = edit end
-            local dis_changed, dis_new = W.check("Disable All Modifications##pw_dis", edit.disabled or false,
-                "Skip all mod edits for this weapon — it will use vanilla game values")
-            if dis_changed then
-                if dis_new then
-                    NATIVE.sync("kill_semi")
-                    NATIVE.sync("kill_burst")
-                    if reset_weapon_edits_from_defaults(key, true) then
-                        ui_state.status = "Disabled all mods (restored defaults): " .. (WEAPON_NAMES[key] or key)
-                    else
-                        edit.disabled = true
+            if #profile_state.names > 0 then
+                local prof_changed
+                prof_changed, profile_state.selected = W.combo("Profile##rrof_profile", profile_state.selected, profile_state.names)
+                if profile_state.selected < 1 then profile_state.selected = 1 end
+                if profile_state.selected > #profile_state.names then profile_state.selected = #profile_state.names end
+                if prof_changed then
+                    local pname = profile_state.names[profile_state.selected]
+                    if pname and load_profile(pname) then
                         apply_all_now()
-                        ui_state.status = "Disabled all mods (no captured defaults — capture first to restore vanilla): " .. (WEAPON_NAMES[key] or key)
+                        push_live_for_current_equipment()
+                        save_profile_index()
+                        ui_state.status = "Loaded profile: " .. pname
                     end
-                else
-                    local restored = restore_weapon_edit_from_active_profile(key)
-                    if not restored and rof_edits[key] then
-                        rof_edits[key].disabled = nil
+                end
+                if W.button("Save profile##rrof_save", "Save") then
+                    local pname = profile_state.names[profile_state.selected]
+                    if pname then
+                        save_profile(pname)
+                        ui_state.status = "Profile saved: " .. pname
                     end
-                    apply_all_now()
-                    push_live_for_current_equipment()
-                    if restored then
-                        ui_state.status = (WEAPON_NAMES[key] or key) .. " modifications enabled (from profile)"
+                end
+                W.same_line()
+                if W.button("Delete profile##rrof_delete", "Delete") then
+                    local pname = profile_state.names[profile_state.selected]
+                    if pname then
+                        delete_profile(pname)
+                        ui_state.status = "Deleted profile: " .. pname
+                    end
+                end
+                W.same_line()
+            end
+            if W.button("New profile##rrof_new", "New Profile") then
+                profile_state.naming = not profile_state.naming
+            end
+            if profile_state.naming then
+                local buf_changed
+                buf_changed, profile_state.name_buf = W.input("Name##rrof_name", profile_state.name_buf)
+                W.same_line()
+                if W.button("Create profile##rrof_create", "Create") then
+                    local safe = sanitize_filename(profile_state.name_buf)
+                    if safe ~= "" then
+                        save_profile(safe)
+                        for i, n in ipairs(profile_state.names) do
+                            if n == safe then profile_state.selected = i; break end
+                        end
+                        save_profile_index()
+                        profile_state.name_buf = ""
+                        profile_state.naming = false
+                        ui_state.status = "Profile saved: " .. safe
                     else
-                        ui_state.status = (WEAPON_NAMES[key] or key)
-                            .. " modifications enabled (no entry in profile file — save profile to persist)"
+                        ui_state.status = "Enter a profile name"
+                    end
+                end
+                if ui_state.status:match("^Enter a profile name") then
+                    W.same_line()
+                    W.text(ui_state.status, 0xFF00FFFF)
+                end
+            end
+            if ui_state.status:match("^Profile saved:") or ui_state.status:match("^Deleted profile:") then
+                W.text(ui_state.status, ui_state.status:match("^Deleted") and 0xFF5555FF or 0xFF00FF00)
+            end
+        end)
+    end
+
+    if show("weapons") then
+        -- the weapon picked in the list, its settings in the cards below
+        local any_changed = false
+        local weapon_disabled = false
+        W.card("weapon", "Weapon", function()
+            local equipped_key, pe = get_equipped_weapon_id_cached()
+            if pe and equipped_key then
+                local eid_name = WEAPON_NAMES[equipped_key]
+                local is_known = eid_name ~= nil
+                if equipped_key == "arm0400" then
+                    eid_name = player_is_leon() and WEAPON_NAMES["arm0400_leon"] or WEAPON_NAMES["arm0400_grace"]
+                    is_known = eid_name ~= nil
+                elseif equipped_key == "arm0000" and matilda_stock_attached() then
+                    eid_name = WEAPON_NAMES["arm0000_stock"]
+                    is_known = true
+                end
+                eid_name = eid_name or equipped_key
+                if is_known then
+                    local current_type = 0
+                    pcall(function() current_type = pe:get_field("_EquipShotType") end)
+                    current_type = smooth_get_display_mode() or tonumber(current_type) or 0
+                    eid_name = eid_name .. " (" .. (FIRE_MODE_NAMES[current_type] or "?") .. ")"
+                end
+                -- (no Equipped line in any menu: user, "dont show the equipped or current weapon stat in the menus")
+
+                -- Auto-select weapon row when equip id, stock, or character context changes
+                local sig_now = rof_equip_context_signature()
+                if sig_now and sig_now ~= last_equip_context_sig then
+                    local eff = rof_resolve_effective_weapon_key(equipped_key)
+                    for i, key in ipairs(dropdown_items) do
+                        if key == eff then
+                            selected_index = i
+                            local vals = rof_edits[key] or rof_defaults[key] or rof_defaults[rof_catalog_id_for_key(key)]
+                                or read_live_values(key)
+                            populate_ui_from_vals(vals, key)
+                            break
+                        end
+                    end
+                    last_equip_context_sig = sig_now
+                end
+            else
+            end
+
+            changed, selected_index = W.combo("Weapon##rrof_weapon", selected_index, dropdown_options)
+            if selected_index < 1 then selected_index = 1 end
+            if selected_index > #dropdown_items then selected_index = #dropdown_items end
+            if changed then
+                local key = dropdown_items[selected_index]
+                local vals = rof_edits[key] or rof_defaults[key] or rof_defaults[rof_catalog_id_for_key(key)]
+                    or read_live_values(key)
+                populate_ui_from_vals(vals, key)
+            end
+
+            local key = dropdown_items[selected_index]
+            if key then
+                local edit = rof_edits[key]
+                if not edit then edit = {}; rof_edits[key] = edit end
+                local dis_changed, dis_new = W.check("Disable All Modifications##pw_dis", edit.disabled or false,
+                    "Skip all mod edits for this weapon — it will use vanilla game values")
+                if dis_changed then
+                    if dis_new then
+                        NATIVE.sync("kill_semi")
+                        NATIVE.sync("kill_burst")
+                        if reset_weapon_edits_from_defaults(key, true) then
+                            ui_state.status = "Disabled all mods (restored defaults): " .. (WEAPON_NAMES[key] or key)
+                        else
+                            edit.disabled = true
+                            apply_all_now()
+                            ui_state.status = "Disabled all mods (no captured defaults — capture first to restore vanilla): " .. (WEAPON_NAMES[key] or key)
+                        end
+                    else
+                        local restored = restore_weapon_edit_from_active_profile(key)
+                        if not restored and rof_edits[key] then
+                            rof_edits[key].disabled = nil
+                        end
+                        apply_all_now()
+                        push_live_for_current_equipment()
+                        if restored then
+                            ui_state.status = (WEAPON_NAMES[key] or key) .. " modifications enabled (from profile)"
+                        else
+                            ui_state.status = (WEAPON_NAMES[key] or key)
+                                .. " modifications enabled (no entry in profile file — save profile to persist)"
+                        end
+                    end
+                end
+                local cur_edit = rof_edits[key]
+                weapon_disabled = (cur_edit and cur_edit.disabled) or false
+            end
+
+            if weapon_disabled then
+                W.text("(All modifications disabled for this weapon)", 0xFF8888FF)
+                local shoot_idx = math.floor(ui_state.type_of_shoot + 1)
+                if shoot_idx < 1 then shoot_idx = 1 end
+                if shoot_idx > 3 then shoot_idx = 3 end
+                local d_changed, d_new = W.combo("TypeOfShoot (hotkey cycling off for this weapon)##pw_dis", shoot_idx, SHOOT_TYPES,
+                    "Same idea as global Disable Select Fire: use this dropdown instead of the fire-mode hotkey while this weapon has all modifications disabled.")
+                if d_changed and key then
+                    ui_state.type_of_shoot = d_new - 1
+                    if not rof_edits[key] then rof_edits[key] = {} end
+                    rof_edits[key].TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5)
+                    apply_all_now()
+                    push_equip_shot_type_if_matches(key, ui_state.type_of_shoot)
+                    ui_state.status = "Fire mode: " .. (SHOOT_TYPES[d_new] or tostring(d_new))
+                end
+                return
+            end
+
+            if key then
+                local edit = rof_edits[key]
+                if edit.allow_semi == nil then edit.allow_semi = true end
+                if edit.allow_full == nil then edit.allow_full = true end
+                if edit.allow_burst == nil then edit.allow_burst = true end
+
+                local tip = "Select which fire modes are available when cycling with the hotkey"
+                local sc; sc, edit.allow_semi = W.check("Semi##allow", edit.allow_semi, tip)
+                W.same_line()
+                local fc; fc, edit.allow_full = W.check("Full-Auto##allow", edit.allow_full, tip)
+                W.same_line()
+                local bc; bc, edit.allow_burst = W.check("Burst##allow", edit.allow_burst, tip)
+                if not edit.allow_semi and not edit.allow_full and not edit.allow_burst then
+                    edit.allow_semi = true
+                end
+                if sc or fc or bc then NATIVE.sync() end
+
+                local g_semi = rof_settings.smooth_semi_auto
+                local g_burst = rof_settings.smooth_burst
+                if not g_semi then edit.smooth_semi = nil end
+                if not g_burst then edit.smooth_burst = nil end
+                if g_semi then
+                    local pw_semi = edit.smooth_semi
+                    if pw_semi == nil then pw_semi = g_semi end
+                    local pss_changed
+                    pss_changed, pw_semi = W.check("Improved Semi-Auto##pw", pw_semi, "Semi-Auto animations layer properly")
+                    if pss_changed then
+                        edit.smooth_semi = pw_semi
+                        NATIVE.sync(not pw_semi and "kill_semi" or nil)
+                    end
+                end
+                if g_burst then
+                    if g_semi then W.same_line() end
+                    local pw_burst = edit.smooth_burst
+                    if pw_burst == nil then pw_burst = g_burst end
+                    local psb_changed
+                    psb_changed, pw_burst = W.check("Improved Burst##pw", pw_burst, "Burst animations layer properly")
+                    if psb_changed then
+                        edit.smooth_burst = pw_burst
+                        NATIVE.sync(not pw_burst and "kill_burst" or nil)
                     end
                 end
             end
-            local cur_edit = rof_edits[key]
-            weapon_disabled = (cur_edit and cur_edit.disabled) or false
-        end
 
-        if weapon_disabled then
-            W.text("(All modifications disabled for this weapon)", 0xFF8888FF)
-            local shoot_idx = math.floor(ui_state.type_of_shoot + 1)
-            if shoot_idx < 1 then shoot_idx = 1 end
-            if shoot_idx > 3 then shoot_idx = 3 end
-            local d_changed, d_new = W.combo("TypeOfShoot (hotkey cycling off for this weapon)##pw_dis", shoot_idx, SHOOT_TYPES,
-                "Same idea as global Disable Select Fire: use this dropdown instead of the fire-mode hotkey while this weapon has all modifications disabled.")
-            if d_changed and key then
-                ui_state.type_of_shoot = d_new - 1
-                if not rof_edits[key] then rof_edits[key] = {} end
-                rof_edits[key].TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5)
-                apply_all_now()
-                push_equip_shot_type_if_matches(key, ui_state.type_of_shoot)
-                ui_state.status = "Fire mode: " .. (SHOOT_TYPES[d_new] or tostring(d_new))
+            if rof_settings.disable_select_fire then
+                local shoot_idx = math.floor(ui_state.type_of_shoot + 1)
+                if shoot_idx < 1 then shoot_idx = 1 end
+                if shoot_idx > 3 then shoot_idx = 3 end
+                changed, shoot_idx = W.combo("TypeOfShoot", shoot_idx, SHOOT_TYPES)
+                if changed then ui_state.type_of_shoot = shoot_idx - 1; any_changed = true end
             end
-            return
-        end
 
-        if key then
-            local edit = rof_edits[key]
-            if edit.allow_semi == nil then edit.allow_semi = true end
-            if edit.allow_full == nil then edit.allow_full = true end
-            if edit.allow_burst == nil then edit.allow_burst = true end
-
-            local tip = "Select which fire modes are available when cycling with the hotkey"
-            local sc; sc, edit.allow_semi = W.check("Semi##allow", edit.allow_semi, tip)
-            W.same_line()
-            local fc; fc, edit.allow_full = W.check("Full-Auto##allow", edit.allow_full, tip)
-            W.same_line()
-            local bc; bc, edit.allow_burst = W.check("Burst##allow", edit.allow_burst, tip)
-            if not edit.allow_semi and not edit.allow_full and not edit.allow_burst then
-                edit.allow_semi = true
+            changed, ui_state.shot_interval = W.float("ShotInterval", ui_state.shot_interval, 0.01, 0.0, 10.0)
+            if changed then any_changed = true end
+            if not get_weapon_smooth_burst(key) then
+                changed, ui_state.burst_shot_interval = W.float("BurstShotInterval", ui_state.burst_shot_interval, 0.01, 0.0, 10.0)
+                if changed then any_changed = true end
             end
-            if sc or fc or bc then NATIVE.sync() end
-
-            local g_semi = rof_settings.smooth_semi_auto
-            local g_burst = rof_settings.smooth_burst
-            if not g_semi then edit.smooth_semi = nil end
-            if not g_burst then edit.smooth_burst = nil end
-            if g_semi then
-                local pw_semi = edit.smooth_semi
-                if pw_semi == nil then pw_semi = g_semi end
-                local pss_changed
-                pss_changed, pw_semi = W.check("Improved Semi-Auto##pw", pw_semi, "Semi-Auto animations layer properly")
-                if pss_changed then
-                    edit.smooth_semi = pw_semi
-                    NATIVE.sync(not pw_semi and "kill_semi" or nil)
-                end
-            end
-            if g_burst then
-                if g_semi then W.same_line() end
-                local pw_burst = edit.smooth_burst
-                if pw_burst == nil then pw_burst = g_burst end
-                local psb_changed
-                psb_changed, pw_burst = W.check("Improved Burst##pw", pw_burst, "Burst animations layer properly")
-                if psb_changed then
-                    edit.smooth_burst = pw_burst
-                    NATIVE.sync(not pw_burst and "kill_burst" or nil)
-                end
-            end
-        end
-
-        if rof_settings.disable_select_fire then
-            local shoot_idx = math.floor(ui_state.type_of_shoot + 1)
-            if shoot_idx < 1 then shoot_idx = 1 end
-            if shoot_idx > 3 then shoot_idx = 3 end
-            changed, shoot_idx = W.combo("TypeOfShoot", shoot_idx, SHOOT_TYPES)
-            if changed then ui_state.type_of_shoot = shoot_idx - 1; any_changed = true end
-        end
-
-        changed, ui_state.shot_interval = W.float("ShotInterval", ui_state.shot_interval, 0.01, 0.0, 10.0)
-        if changed then any_changed = true end
-        if not get_weapon_smooth_burst(key) then
-            changed, ui_state.burst_shot_interval = W.float("BurstShotInterval", ui_state.burst_shot_interval, 0.01, 0.0, 10.0)
-            if changed then any_changed = true end
-        end
-        changed, ui_state.burst_num = W.float("BurstNum", ui_state.burst_num, 1.0, 0.0, 20.0, "%.0f")
-        if changed then any_changed = true end
-    end)
-
-    if not weapon_disabled then
-        W.card("recoil", "Camera Recoil", function()
-            changed, ui_state.recoil_rate = W.float("Rate", ui_state.recoil_rate, 0.01, 0.0, 10.0, "%.3f")
-            if changed then any_changed = true end
-            changed, ui_state.recoil_yaw_s = W.float("Yaw Min", ui_state.recoil_yaw_s, 0.01, -10.0, 10.0, "%.3f")
-            if changed then any_changed = true end
-            changed, ui_state.recoil_yaw_r = W.float("Yaw Max", ui_state.recoil_yaw_r, 0.01, -10.0, 10.0, "%.3f")
-            if changed then any_changed = true end
-            changed, ui_state.recoil_pitch_s = W.float("Pitch Min", ui_state.recoil_pitch_s, 0.01, -10.0, 10.0, "%.3f")
-            if changed then any_changed = true end
-            changed, ui_state.recoil_pitch_r = W.float("Pitch Max", ui_state.recoil_pitch_r, 0.01, -10.0, 10.0, "%.3f")
+            changed, ui_state.burst_num = W.float("BurstNum", ui_state.burst_num, 1.0, 0.0, 20.0, "%.0f")
             if changed then any_changed = true end
         end)
 
-        if rof_settings.enable_recoil_anim_override then
-            W.card("anim", "Recoil Animation", function()
-                local bac_layer = get_body_add_ctrl_layer()
-                if not bac_layer then
-                    W.text("(not found)")
+        if not weapon_disabled then
+            W.card("recoil", "Camera Recoil", function()
+                changed, ui_state.recoil_rate = W.float("Rate", ui_state.recoil_rate, 0.01, 0.0, 10.0, "%.3f")
+                if changed then any_changed = true end
+                changed, ui_state.recoil_yaw_s = W.float("Yaw Min", ui_state.recoil_yaw_s, 0.01, -10.0, 10.0, "%.3f")
+                if changed then any_changed = true end
+                changed, ui_state.recoil_yaw_r = W.float("Yaw Max", ui_state.recoil_yaw_r, 0.01, -10.0, 10.0, "%.3f")
+                if changed then any_changed = true end
+                changed, ui_state.recoil_pitch_s = W.float("Pitch Min", ui_state.recoil_pitch_s, 0.01, -10.0, 10.0, "%.3f")
+                if changed then any_changed = true end
+                changed, ui_state.recoil_pitch_r = W.float("Pitch Max", ui_state.recoil_pitch_r, 0.01, -10.0, 10.0, "%.3f")
+                if changed then any_changed = true end
+            end)
+
+            if rof_settings.enable_recoil_anim_override then
+                W.card("anim", "Recoil Animation", function()
+                    local bac_layer = get_body_add_ctrl_layer()
+                    if not bac_layer then
+                        W.text("(not found)")
+                        return
+                    end
+                    local br = 0; pcall(function() br = bac_layer:call("get_BlendRate") end)
+                    local spd = 0; pcall(function() spd = bac_layer:call("get_Speed") end)
+
+                    local wkey = dropdown_items[selected_index]
+                    local wedit = wkey and rof_edits[wkey]
+                    local ra_enabled = wedit and wedit.recoil_anim_enabled or false
+                    local ra_force = wedit and wedit.recoil_anim_force or 1.0
+                    local ra_speed = wedit and wedit.recoil_anim_speed or 1.0
+
+                    local lock_changed, lock_new = W.check("Enable##recoil_anim", ra_enabled)
+                    if lock_changed and wkey then
+                        if not rof_edits[wkey] then rof_edits[wkey] = {} end
+                        rof_edits[wkey].recoil_anim_enabled = lock_new
+                        if lock_new then
+                            if not rof_edits[wkey].recoil_anim_force then rof_edits[wkey].recoil_anim_force = br end
+                            if not rof_edits[wkey].recoil_anim_speed then rof_edits[wkey].recoil_anim_speed = spd end
+                        end
+                        ra_enabled = lock_new
+                        ra_force = rof_edits[wkey].recoil_anim_force or 1.0
+                        ra_speed = rof_edits[wkey].recoil_anim_speed or 1.0
+                        NATIVE.sync()
+                    end
+
+                    if ra_enabled then
+                        local br_changed, br_new = W.float("Recoil Animation Force", ra_force, 0.01, 0.0, 1.0)
+                        if br_changed and wkey then
+                            if not rof_edits[wkey] then rof_edits[wkey] = {} end
+                            rof_edits[wkey].recoil_anim_force = br_new
+                            NATIVE.sync()
+                        end
+
+                        local spd_changed, spd_new = W.float("Recoil Animation Speed", ra_speed, 0.1, 0.0, 100.0)
+                        if spd_changed and wkey then
+                            if not rof_edits[wkey] then rof_edits[wkey] = {} end
+                            rof_edits[wkey].recoil_anim_speed = spd_new
+                            NATIVE.sync()
+                        end
+                    end
+                end)
+            end
+
+            W.card("shake", "Shot Camera Shake", function()
+                local wkey = dropdown_items[selected_index]
+                local wd = wkey and find_weapon_data_by_key(rof_catalog_id_for_key(wkey))
+                local move = wd and resolve_shot_camera_shake_move(wd)
+                if not move then
+                    W.text("No ShotCameraShakeParam._Move found")
                     return
                 end
-                local br = 0; pcall(function() br = bac_layer:call("get_BlendRate") end)
-                local spd = 0; pcall(function() spd = bac_layer:call("get_Speed") end)
-
-                local wkey = dropdown_items[selected_index]
-                local wedit = wkey and rof_edits[wkey]
-                local ra_enabled = wedit and wedit.recoil_anim_enabled or false
-                local ra_force = wedit and wedit.recoil_anim_force or 1.0
-                local ra_speed = wedit and wedit.recoil_anim_speed or 1.0
-
-                local lock_changed, lock_new = W.check("Enable##recoil_anim", ra_enabled)
-                if lock_changed and wkey then
-                    if not rof_edits[wkey] then rof_edits[wkey] = {} end
-                    rof_edits[wkey].recoil_anim_enabled = lock_new
-                    if lock_new then
-                        if not rof_edits[wkey].recoil_anim_force then rof_edits[wkey].recoil_anim_force = br end
-                        if not rof_edits[wkey].recoil_anim_speed then rof_edits[wkey].recoil_anim_speed = spd end
+                local axes = {
+                    { label = "Translation X", field = "_TranslationXRange", sk = "tx_s", rk = "tx_r" },
+                    { label = "Translation Y", field = "_TranslationYRange", sk = "ty_s", rk = "ty_r" },
+                    { label = "Translation Z", field = "_TranslationZRange", sk = "tz_s", rk = "tz_r" },
+                }
+                local scsm_changed = false
+                -- the DLL writes the catalog from the edit, so the sliders show the edit's values once it has them
+                local kept = wkey and rof_edits[wkey] and rof_edits[wkey].shot_camera_shake_move
+                local pend = {}
+                for _, axis in ipairs(axes) do
+                    local range_val = try_field(move, axis.field)
+                    if range_val then
+                        local mn = tonumber(range_val.s) or 0
+                        local mx = tonumber(range_val.r) or 0
+                        if kept and kept[axis.sk] ~= nil then mn = kept[axis.sk] end
+                        if kept and kept[axis.rk] ~= nil then mx = kept[axis.rk] end
+                        local c1, new_min = W.float(axis.label .. " Min", mn, 0.001, -10.0, 10.0, "%.4f")
+                        local c2, new_max = W.float(axis.label .. " Max", mx, 0.001, -10.0, 10.0, "%.4f")
+                        pend[axis.sk], pend[axis.rk] = c1 and new_min or mn, c2 and new_max or mx
+                        if c1 or c2 then scsm_changed = true end
+                    else
+                        W.text(axis.label .. ": not found")
                     end
-                    ra_enabled = lock_new
-                    ra_force = rof_edits[wkey].recoil_anim_force or 1.0
-                    ra_speed = rof_edits[wkey].recoil_anim_speed or 1.0
-                    NATIVE.sync()
                 end
-
-                if ra_enabled then
-                    local br_changed, br_new = W.float("Recoil Animation Force", ra_force, 0.01, 0.0, 1.0)
-                    if br_changed and wkey then
-                        if not rof_edits[wkey] then rof_edits[wkey] = {} end
-                        rof_edits[wkey].recoil_anim_force = br_new
-                        NATIVE.sync()
-                    end
-
-                    local spd_changed, spd_new = W.float("Recoil Animation Speed", ra_speed, 0.1, 0.0, 100.0)
-                    if spd_changed and wkey then
-                        if not rof_edits[wkey] then rof_edits[wkey] = {} end
-                        rof_edits[wkey].recoil_anim_speed = spd_new
-                        NATIVE.sync()
-                    end
+                if scsm_changed and wkey then
+                    local edit = rof_edits[wkey]
+                    if not edit then edit = {}; rof_edits[wkey] = edit end
+                    edit.shot_camera_shake_move = pend
+                    NATIVE.sync()
                 end
             end)
         end
 
-        W.card("shake", "Shot Camera Shake", function()
-            local wkey = dropdown_items[selected_index]
-            local wd = wkey and find_weapon_data_by_key(rof_catalog_id_for_key(wkey))
-            local move = wd and resolve_shot_camera_shake_move(wd)
-            if not move then
-                W.text("No ShotCameraShakeParam._Move found")
-                return
-            end
-            local axes = {
-                { label = "Translation X", field = "_TranslationXRange", sk = "tx_s", rk = "tx_r" },
-                { label = "Translation Y", field = "_TranslationYRange", sk = "ty_s", rk = "ty_r" },
-                { label = "Translation Z", field = "_TranslationZRange", sk = "tz_s", rk = "tz_r" },
-            }
-            local scsm_changed = false
-            -- the DLL writes the catalog from the edit, so the sliders show the edit's values once it has them
-            local kept = wkey and rof_edits[wkey] and rof_edits[wkey].shot_camera_shake_move
-            local pend = {}
-            for _, axis in ipairs(axes) do
-                local range_val = try_field(move, axis.field)
-                if range_val then
-                    local mn = tonumber(range_val.s) or 0
-                    local mx = tonumber(range_val.r) or 0
-                    if kept and kept[axis.sk] ~= nil then mn = kept[axis.sk] end
-                    if kept and kept[axis.rk] ~= nil then mx = kept[axis.rk] end
-                    local c1, new_min = W.float(axis.label .. " Min", mn, 0.001, -10.0, 10.0, "%.4f")
-                    local c2, new_max = W.float(axis.label .. " Max", mx, 0.001, -10.0, 10.0, "%.4f")
-                    pend[axis.sk], pend[axis.rk] = c1 and new_min or mn, c2 and new_max or mx
-                    if c1 or c2 then scsm_changed = true end
+        if any_changed and not weapon_disabled then
+            local key = dropdown_items[selected_index]
+            if key then
+                if not rof_edits[key] then rof_edits[key] = {} end
+                local edit = rof_edits[key]
+                edit.TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5)
+                edit.ShotInterval = ui_state.shot_interval
+                edit.BurstShotInterval = ui_state.burst_shot_interval
+                edit.BurstNum = math.floor(ui_state.burst_num + 0.5)
+                edit.recoil = {
+                    rate = ui_state.recoil_rate,
+                    yaw_s = ui_state.recoil_yaw_s,
+                    yaw_r = ui_state.recoil_yaw_r,
+                    pitch_s = ui_state.recoil_pitch_s,
+                    pitch_r = ui_state.recoil_pitch_r,
+                }
+                apply_all_now()
+                if apply_to_equipped(key, edit) then
+                    ui_state.status = "Applied live: " .. (WEAPON_NAMES[key] or key)
                 else
-                    W.text(axis.label .. ": not found")
+                    ui_state.status = "Saved settings for " .. (WEAPON_NAMES[key] or key)
                 end
             end
-            if scsm_changed and wkey then
-                local edit = rof_edits[wkey]
-                if not edit then edit = {}; rof_edits[wkey] = edit end
-                edit.shot_camera_shake_move = pend
-                NATIVE.sync()
+        end
+
+        W.card("defaults", "Defaults", function()
+            if W.button("Reset the current weapon##rrof_reset_one", "Reset Current Weapon") then
+                local key = dropdown_items[selected_index]
+                if key and reset_weapon_edits_from_defaults(key, false) then
+                    ui_state.status = "Reset " .. (WEAPON_NAMES[key] or key) .. " to defaults"
+                elseif key then
+                    ui_state.status = "No defaults saved for " .. (WEAPON_NAMES[key] or key) .. " (capture first)"
+                end
+            end
+            W.same_line()
+            if W.button("Reset every weapon##rrof_reset_all", "Reset All to Defaults") then
+                local count = 0
+                for dkey, def in pairs(rof_defaults) do
+                    rof_edits[dkey] = {
+                        TypeOfShoot = def.TypeOfShoot,
+                        ShotInterval = def.ShotInterval,
+                        BurstShotInterval = def.BurstShotInterval,
+                        BurstNum = def.BurstNum,
+                        recoil = def.recoil and {
+                            rate = def.recoil.rate,
+                            yaw_s = def.recoil.yaw_s,
+                            yaw_r = def.recoil.yaw_r,
+                            pitch_s = def.recoil.pitch_s,
+                            pitch_r = def.recoil.pitch_r,
+                        } or nil,
+                        shot_camera_shake_move = def.shot_camera_shake_move and {
+                            tx_s = def.shot_camera_shake_move.tx_s,
+                            tx_r = def.shot_camera_shake_move.tx_r,
+                            ty_s = def.shot_camera_shake_move.ty_s,
+                            ty_r = def.shot_camera_shake_move.ty_r,
+                            tz_s = def.shot_camera_shake_move.tz_s,
+                            tz_r = def.shot_camera_shake_move.tz_r,
+                        } or nil,
+                        recoil_anim_enabled = def.recoil_anim_enabled or false,
+                        recoil_anim_force = def.recoil_anim_force or 1.0,
+                        recoil_anim_speed = def.recoil_anim_speed or 1.0,
+                        smooth_semi = nil,
+                        smooth_burst = nil,
+                        disabled = nil,
+                    }
+                    if def.EnableAimCameraShake ~= nil then
+                        ui_state.enable_aim_camera_shake = def.EnableAimCameraShake
+                    end
+                    count = count + 1
+                end
+                apply_all_now()
+                local key = dropdown_items[selected_index]
+                if key then
+                    populate_ui_from_vals(rof_defaults[key], key)
+                end
+                ui_state.status = "Reset all " .. tostring(count) .. " weapons to defaults"
+            end
+
+            local profile_msg = ui_state.status:match("^Enter a profile name")
+                or ui_state.status:match("^Profile saved:")
+                or ui_state.status:match("^Deleted profile:")
+            if ui_state.status ~= "" and not profile_msg then
+                local color = 0xFFFFFFFF
+                local is_status = ui_state.status:match(": ")
+                    or ui_state.status:match("^Saved settings for")
+                    or ui_state.status:match("^Reset ")
+                    or ui_state.status:match("^Captured defaults")
+                    or ui_state.status:match("^Applied live")
+                if is_status then
+                    color = 0xFF00FF00
+                elseif ui_state.status:match("^No defaults saved") then
+                    color = 0xFF00FFFF
+                end
+                W.text(ui_state.status, color)
             end
         end)
     end
 
-    if any_changed and not weapon_disabled then
-        local key = dropdown_items[selected_index]
-        if key then
-            if not rof_edits[key] then rof_edits[key] = {} end
-            local edit = rof_edits[key]
-            edit.TypeOfShoot = math.floor(ui_state.type_of_shoot + 0.5)
-            edit.ShotInterval = ui_state.shot_interval
-            edit.BurstShotInterval = ui_state.burst_shot_interval
-            edit.BurstNum = math.floor(ui_state.burst_num + 0.5)
-            edit.recoil = {
-                rate = ui_state.recoil_rate,
-                yaw_s = ui_state.recoil_yaw_s,
-                yaw_r = ui_state.recoil_yaw_r,
-                pitch_s = ui_state.recoil_pitch_s,
-                pitch_r = ui_state.recoil_pitch_r,
-            }
-            apply_all_now()
-            if apply_to_equipped(key, edit) then
-                ui_state.status = "Applied live: " .. (WEAPON_NAMES[key] or key)
-            else
-                ui_state.status = "Saved settings for " .. (WEAPON_NAMES[key] or key)
-            end
-        end
-    end
-
-    W.card("defaults", "Defaults", function()
-        if W.button("Reset the current weapon##rrof_reset_one", "Reset Current Weapon") then
-            local key = dropdown_items[selected_index]
-            if key and reset_weapon_edits_from_defaults(key, false) then
-                ui_state.status = "Reset " .. (WEAPON_NAMES[key] or key) .. " to defaults"
-            elseif key then
-                ui_state.status = "No defaults saved for " .. (WEAPON_NAMES[key] or key) .. " (capture first)"
-            end
-        end
-        W.same_line()
-        if W.button("Reset every weapon##rrof_reset_all", "Reset All to Defaults") then
-            local count = 0
-            for dkey, def in pairs(rof_defaults) do
-                rof_edits[dkey] = {
-                    TypeOfShoot = def.TypeOfShoot,
-                    ShotInterval = def.ShotInterval,
-                    BurstShotInterval = def.BurstShotInterval,
-                    BurstNum = def.BurstNum,
-                    recoil = def.recoil and {
-                        rate = def.recoil.rate,
-                        yaw_s = def.recoil.yaw_s,
-                        yaw_r = def.recoil.yaw_r,
-                        pitch_s = def.recoil.pitch_s,
-                        pitch_r = def.recoil.pitch_r,
-                    } or nil,
-                    shot_camera_shake_move = def.shot_camera_shake_move and {
-                        tx_s = def.shot_camera_shake_move.tx_s,
-                        tx_r = def.shot_camera_shake_move.tx_r,
-                        ty_s = def.shot_camera_shake_move.ty_s,
-                        ty_r = def.shot_camera_shake_move.ty_r,
-                        tz_s = def.shot_camera_shake_move.tz_s,
-                        tz_r = def.shot_camera_shake_move.tz_r,
-                    } or nil,
-                    recoil_anim_enabled = def.recoil_anim_enabled or false,
-                    recoil_anim_force = def.recoil_anim_force or 1.0,
-                    recoil_anim_speed = def.recoil_anim_speed or 1.0,
-                    smooth_semi = nil,
-                    smooth_burst = nil,
-                    disabled = nil,
-                }
-                if def.EnableAimCameraShake ~= nil then
-                    ui_state.enable_aim_camera_shake = def.EnableAimCameraShake
-                end
-                count = count + 1
-            end
-            apply_all_now()
-            local key = dropdown_items[selected_index]
-            if key then
-                populate_ui_from_vals(rof_defaults[key], key)
-            end
-            ui_state.status = "Reset all " .. tostring(count) .. " weapons to defaults"
-        end
-
-        local profile_msg = ui_state.status:match("^Enter a profile name")
-            or ui_state.status:match("^Profile saved:")
-            or ui_state.status:match("^Deleted profile:")
-        if ui_state.status ~= "" and not profile_msg then
-            local color = 0xFFFFFFFF
-            local is_status = ui_state.status:match(": ")
-                or ui_state.status:match("^Saved settings for")
-                or ui_state.status:match("^Reset ")
-                or ui_state.status:match("^Captured defaults")
-                or ui_state.status:match("^Applied live")
-            if is_status then
-                color = 0xFF00FF00
-            elseif ui_state.status:match("^No defaults saved") then
-                color = 0xFF00FFFF
-            end
-            W.text(ui_state.status, color)
-        end
-    end)
-
-    W.card("overlay", "Fire Mode Overlay", function()
-        local style_changed
-        local style_idx = (rof_settings.overlay_style or 1) + 1
-        style_changed, style_idx = W.combo("Style##rrof_overlay_style", style_idx, OVERLAY_STYLES,
-            "Choose the fire mode overlay style shown when switching modes")
-        if style_changed then
-            rof_settings.overlay_style = style_idx - 1
-            show_fire_mode_overlay = rof_settings.overlay_style > 0
-            rof_settings.show_fire_mode_overlay = show_fire_mode_overlay
-            rof_settings.overlay_use_rects = rof_settings.overlay_style == 2
-            NATIVE.sync()
-            save_settings()
-        end
-
-        if rof_settings.overlay_style == 4 then
-            local hk_changed, hk_new = W.color("German Color", rof_settings.overlay_hk_color, "Color and opacity of the German pictograms")
-            W.same_line()
-            if W.button("German color back to Default##hk_color", "Default") then
-                hk_changed, hk_new = true, rof_settings_defaults.overlay_hk_color
-            end
-            if hk_changed then
-                rof_settings.overlay_hk_color = hk_new
+    if show("overlay") then
+        W.card("overlay", "Fire Mode Overlay", function()
+            local style_changed
+            local style_idx = (rof_settings.overlay_style or 1) + 1
+            style_changed, style_idx = W.combo("Style##rrof_overlay_style", style_idx, OVERLAY_STYLES,
+                "Choose the fire mode overlay style shown when switching modes")
+            if style_changed then
+                rof_settings.overlay_style = style_idx - 1
+                show_fire_mode_overlay = rof_settings.overlay_style > 0
+                rof_settings.show_fire_mode_overlay = show_fire_mode_overlay
+                rof_settings.overlay_use_rects = rof_settings.overlay_style == 2
                 NATIVE.sync()
                 save_settings()
             end
-        end
 
-        local always_changed, always_new = W.check("Always Show (when HUD active)", rof_settings.overlay_always_show)
-        if always_changed then
-            rof_settings.overlay_always_show = always_new
-            NATIVE.sync()
-            save_settings()
-        end
-    end)
+            if rof_settings.overlay_style == 4 then
+                local hk_changed, hk_new = W.color("German Color", rof_settings.overlay_hk_color, "Color and opacity of the German pictograms")
+                W.same_line()
+                if W.button("German color back to Default##hk_color", "Default") then
+                    hk_changed, hk_new = true, rof_settings_defaults.overlay_hk_color
+                end
+                if hk_changed then
+                    rof_settings.overlay_hk_color = hk_new
+                    NATIVE.sync()
+                    save_settings()
+                end
+            end
 
-    W.card("keys", "Hotkeys", function()
-        local wc = false
-        local c
-        if W.merc then
-            c, rof_hk_settings.use_modifier = W.check("Keyboard: hold the modifier##rrof_kb_mod", rof_hk_settings.use_modifier)
-            wc = wc or c
-            c, rof_hk_settings.use_pad_modifier = W.check("Pad: hold the modifier##rrof_pad_mod", rof_hk_settings.use_pad_modifier)
-            wc = wc or c
-            wc = W.keys({ { "Fire mode", "Fire Mode Toggle", "Pad Fire Mode Toggle" },
-                { "Modifier", "Fire Mode Modifier", "Pad Fire Mode Modifier" } }) or wc
-        else
-            imgui.text_colored(" Keyboard and Mouse:", 0xFFFFFFAA)
-            c, rof_hk_settings.use_modifier = W.check("Use Modifier##kb_mod", rof_hk_settings.use_modifier,
-                "Require holding this button while pressing toggle")
-            wc = wc or c
-            imgui.same_line()
-            wc = hk.hotkey_setter("Fire Mode Modifier") or wc
-            wc = hk.hotkey_setter("Fire Mode Toggle", rof_hk_settings.use_modifier and "Fire Mode Modifier") or wc
+            local always_changed, always_new = W.check("Always Show (when HUD active)", rof_settings.overlay_always_show)
+            if always_changed then
+                rof_settings.overlay_always_show = always_new
+                NATIVE.sync()
+                save_settings()
+            end
+        end)
+    end
 
-            imgui.text_colored(" Gamepad:", 0xFFFFFFAA)
-            c, rof_hk_settings.use_pad_modifier = W.check("Use Modifier##pad_mod", rof_hk_settings.use_pad_modifier,
-                "Require holding this button while pressing toggle")
-            wc = wc or c
-            imgui.same_line()
-            wc = hk.hotkey_setter("Pad Fire Mode Modifier") or wc
-            wc = hk.hotkey_setter("Pad Fire Mode Toggle", rof_hk_settings.use_pad_modifier and "Pad Fire Mode Modifier") or wc
-        end
+    if show("controls") then
+        W.card("keys", "Controls", function()
+            local wc = false
+            local c
+            if W.merc then
+                c, rof_hk_settings.use_modifier = W.check("Keyboard: use modifier##rrof_kb_mod", rof_hk_settings.use_modifier)
+                wc = wc or c
+                c, rof_hk_settings.use_pad_modifier = W.check("Pad: use modifier##rrof_pad_mod", rof_hk_settings.use_pad_modifier)
+                wc = wc or c
+                wc = W.keys({ { "Fire mode", "Fire Mode Toggle", "Pad Fire Mode Toggle" },
+                    { "Modifier", "Fire Mode Modifier", "Pad Fire Mode Modifier" } }) or wc
+            else
+                imgui.text_colored(" Keyboard and Mouse:", 0xFFFFFFAA)
+                c, rof_hk_settings.use_modifier = W.check("Use Modifier##kb_mod", rof_hk_settings.use_modifier,
+                    "Require holding this button while pressing toggle")
+                wc = wc or c
+                imgui.same_line()
+                wc = hk.hotkey_setter("Fire Mode Modifier") or wc
+                wc = hk.hotkey_setter("Fire Mode Toggle", rof_hk_settings.use_modifier and "Fire Mode Modifier") or wc
 
-        if wc then
-            hk.update_hotkey_table(rof_hk_settings.hotkeys)
-            json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
-        end
+                imgui.text_colored(" Gamepad:", 0xFFFFFFAA)
+                c, rof_hk_settings.use_pad_modifier = W.check("Use Modifier##pad_mod", rof_hk_settings.use_pad_modifier,
+                    "Require holding this button while pressing toggle")
+                wc = wc or c
+                imgui.same_line()
+                wc = hk.hotkey_setter("Pad Fire Mode Modifier") or wc
+                wc = hk.hotkey_setter("Pad Fire Mode Toggle", rof_hk_settings.use_pad_modifier and "Pad Fire Mode Modifier") or wc
+            end
 
-        if W.button("Hotkeys back to their defaults##rrof_hk_reset", "Reset Hotkeys to Defaults") then
-            rof_hk_settings = hk.recurse_def_settings({}, rof_hk_default_settings)
-            hk.reset_from_defaults_tbl(rof_hk_default_settings.hotkeys)
-            hk.update_hotkey_table(rof_hk_settings.hotkeys)
-            json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
-        end
-    end)
+            if wc then
+                hk.update_hotkey_table(rof_hk_settings.hotkeys)
+                json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
+            end
+
+        end)
+    end
 
     -- (Advanced Options last, below Hotkeys; user: "for realistic rate of fire move advanced options below hotkeys")
-    W.card("options", "Advanced Options", function()
-        local acs_changed = false
-        acs_changed, ui_state.enable_aim_camera_shake = W.check("Enable Aim Camera Shake", ui_state.enable_aim_camera_shake,
-            "Toggle the camera shake effect when aiming")
-        if acs_changed then
-            apply_all_now()
-            rof_settings.enable_aim_camera_shake = ui_state.enable_aim_camera_shake
-            save_settings()
-            ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
-        end
-
-        -- On = the DLL's "not while shooting" (regrip_mode 2: held back from a shot until the trigger is up and the recoil is
-        -- done), Off = 1 (user: "rename the regrip anmation option called on, but not while shooting. change it to just On and
-        -- remove the old On option"; the old always-on mode 0 is read as On)
-        local regrip_changed, regrip_idx = W.combo("Regrip Animation", rof_settings.regrip_mode == 1 and 2 or 1, { "On", "Off" })
-        if regrip_changed then
-            rof_settings.regrip_mode = regrip_idx == 2 and 1 or 2
-            rof_settings.disable_regrip = rof_settings.regrip_mode == 1
-            NATIVE.sync()
-            save_settings()
-            ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled" or "enabled")
-        end
-
-        local sf_changed
-        sf_changed, rof_settings.disable_select_fire = W.check("Disable Select Fire", rof_settings.disable_select_fire,
-            "Prevent cycling fire modes with the hotkey")
-        if sf_changed then
-            NATIVE.sync()
-            save_settings()
-            ui_state.status = "Select fire " .. (rof_settings.disable_select_fire and "disabled" or "enabled")
-        end
-
-        local rao_changed
-        rao_changed, rof_settings.enable_recoil_anim_override = W.check("Enable Recoil Animation Override",
-            rof_settings.enable_recoil_anim_override, "Master switch for per-weapon Recoil Animation Force/Speed overrides")
-        if rao_changed then
-            NATIVE.sync()
-            save_settings()
-            ui_state.status = "Recoil animation override " .. (rof_settings.enable_recoil_anim_override and "enabled" or "disabled")
-        end
-
-        local ssa_changed
-        ssa_changed, rof_settings.smooth_semi_auto = W.check("Improved Semi-Auto Recoil Animation", rof_settings.smooth_semi_auto,
-            "Global default for Improved Semi-Auto so that shots layer properly (can be overridden per weapon)")
-        if ssa_changed then
-            save_settings()
-            if not rof_settings.smooth_semi_auto then
-                for _, e in pairs(rof_edits) do
-                    if e then e.smooth_semi = nil end
-                end
-                NATIVE.sync("kill_semi")
-            else
-                NATIVE.sync()
+    if show("advanced") then
+        W.card("options", "Advanced Options", function()
+            local acs_changed = false
+            acs_changed, ui_state.enable_aim_camera_shake = W.check("Enable Aim Camera Shake", ui_state.enable_aim_camera_shake,
+                "Toggle the camera shake effect when aiming")
+            if acs_changed then
+                apply_all_now()
+                rof_settings.enable_aim_camera_shake = ui_state.enable_aim_camera_shake
+                save_settings()
+                ui_state.status = "Global Aim Camera Shake: " .. (ui_state.enable_aim_camera_shake and "Enabled" or "Disabled")
             end
-            ui_state.status = "Smooth Semi-Auto " .. (rof_settings.smooth_semi_auto and "enabled" or "disabled")
-        end
 
-        local sb_changed
-        sb_changed, rof_settings.smooth_burst = W.check("Improved Burst Recoil Animation", rof_settings.smooth_burst,
-            "Global default for Improved Burst so that shots layer properly (can be overridden per weapon)")
-        if sb_changed then
-            save_settings()
-            if not rof_settings.smooth_burst then
-                for _, e in pairs(rof_edits) do
-                    if e then e.smooth_burst = nil end
-                end
-                NATIVE.sync("kill_burst")
-            else
+            -- On = the DLL's "not while shooting" (regrip_mode 2: held back from a shot until the trigger is up and the recoil is
+            -- done), Off = 1 (user: "rename the regrip anmation option called on, but not while shooting. change it to just On and
+            -- remove the old On option"; the old always-on mode 0 is read as On)
+            local regrip_changed, regrip_idx = W.combo("Regrip Animation", rof_settings.regrip_mode == 1 and 2 or 1, { "On", "Off" })
+            if regrip_changed then
+                rof_settings.regrip_mode = regrip_idx == 2 and 1 or 2
+                rof_settings.disable_regrip = rof_settings.regrip_mode == 1
                 NATIVE.sync()
+                save_settings()
+                ui_state.status = "Regrip animation " .. (rof_settings.disable_regrip and "disabled" or "enabled")
             end
-            ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
-        end
 
-        -- (hidden for now, user: "comment out the layerd sem-auto and burst recouil option for now"; the saved setting still
-        -- goes to the DLL)
-        -- local lr_changed
-        -- lr_changed, rof_settings.layer_recoil = W.check("Layered Semi-Auto and Burst Recoil", rof_settings.layer_recoil,
-        --     "Semi-auto and burst shots blend into the last shot's recoil like full-auto does,\n"
-        --         .. "instead of restarting it (the game's own semi-auto and burst modes, no fire-mode workaround)")
-        -- if lr_changed then
-        --     NATIVE.sync()
-        --     save_settings()
-        --     ui_state.status = "Layered recoil " .. (rof_settings.layer_recoil and "enabled" or "disabled")
-        -- end
+            local sf_changed
+            sf_changed, rof_settings.disable_select_fire = W.check("Disable Select Fire", rof_settings.disable_select_fire,
+                "Prevent cycling fire modes with the hotkey")
+            if sf_changed then
+                NATIVE.sync()
+                save_settings()
+                ui_state.status = "Select fire " .. (rof_settings.disable_select_fire and "disabled" or "enabled")
+            end
 
-        local dl_changed
-        dl_changed, rof_settings.debug_log = W.check("Debug log##rrof_debug_log", rof_settings.debug_log,
-            "Write this mod's info lines to the REFramework log (errors are always written)")
-        if dl_changed then
-            NATIVE.sync()
-            save_settings()
-        end
-    end, true)
-end
+            local rao_changed
+            rao_changed, rof_settings.enable_recoil_anim_override = W.check("Enable Recoil Animation Override",
+                rof_settings.enable_recoil_anim_override, "Master switch for per-weapon Recoil Animation Force/Speed overrides")
+            if rao_changed then
+                NATIVE.sync()
+                save_settings()
+                ui_state.status = "Recoil animation override " .. (rof_settings.enable_recoil_anim_override and "enabled" or "disabled")
+            end
 
-re.on_draw_ui(function()
-    if imgui.tree_node("Realistic Rate of Fire") then
-        draw_menu(W_IMGUI)
-        imgui.tree_pop()
+            local ssa_changed
+            ssa_changed, rof_settings.smooth_semi_auto = W.check("Improved Semi-Auto Recoil Animation", rof_settings.smooth_semi_auto,
+                "Global default for Improved Semi-Auto so that shots layer properly (can be overridden per weapon)")
+            if ssa_changed then
+                save_settings()
+                if not rof_settings.smooth_semi_auto then
+                    for _, e in pairs(rof_edits) do
+                        if e then e.smooth_semi = nil end
+                    end
+                    NATIVE.sync("kill_semi")
+                else
+                    NATIVE.sync()
+                end
+                ui_state.status = "Smooth Semi-Auto " .. (rof_settings.smooth_semi_auto and "enabled" or "disabled")
+            end
+
+            local sb_changed
+            sb_changed, rof_settings.smooth_burst = W.check("Improved Burst Recoil Animation", rof_settings.smooth_burst,
+                "Global default for Improved Burst so that shots layer properly (can be overridden per weapon)")
+            if sb_changed then
+                save_settings()
+                if not rof_settings.smooth_burst then
+                    for _, e in pairs(rof_edits) do
+                        if e then e.smooth_burst = nil end
+                    end
+                    NATIVE.sync("kill_burst")
+                else
+                    NATIVE.sync()
+                end
+                ui_state.status = "Smooth Burst " .. (rof_settings.smooth_burst and "enabled" or "disabled")
+            end
+
+            -- (hidden for now, user: "comment out the layerd sem-auto and burst recouil option for now"; the saved setting still
+            -- goes to the DLL)
+            -- local lr_changed
+            -- lr_changed, rof_settings.layer_recoil = W.check("Layered Semi-Auto and Burst Recoil", rof_settings.layer_recoil,
+            --     "Semi-auto and burst shots blend into the last shot's recoil like full-auto does,\n"
+            --         .. "instead of restarting it (the game's own semi-auto and burst modes, no fire-mode workaround)")
+            -- if lr_changed then
+            --     NATIVE.sync()
+            --     save_settings()
+            --     ui_state.status = "Layered recoil " .. (rof_settings.layer_recoil and "enabled" or "disabled")
+            -- end
+
+            local dl_changed
+            dl_changed, rof_settings.debug_log = W.check("Debug log##rrof_debug_log", rof_settings.debug_log,
+                "Write this mod's info lines to the REFramework log (errors are always written)")
+            if dl_changed then
+                NATIVE.sync()
+                save_settings()
+            end
+        end, sub == nil)
     end
-end)
+end
 
 -- For Mercenaries' Extras: this menu in its window, with its rows (only when the DLL does the game work)
 _G.RealisticRateOfFire.native = NATIVE.on
+-- (the Gameplay Enhancements window without Mercenaries: EnhancementsMenu/menu.lua, which this mod ships; user: "They all can
+-- exist without each other")
+pcall(require, "EnhancementsMenu/menu")
 _G.RealisticRateOfFire.draw_menu = draw_menu
+-- the window's Reset Subcategory: on Controls, the hotkeys back to their defaults (no button of its own, as Dodge Sprint and
+-- Melee's Controls; user: "yes remove the reset button")
+_G.RealisticRateOfFire.reset_sub = function(sub)
+    if sub ~= "controls" then return end
+    rof_hk_settings = hk.recurse_def_settings({}, rof_hk_default_settings)
+    hk.reset_from_defaults_tbl(rof_hk_default_settings.hotkeys)
+    hk.update_hotkey_table(rof_hk_settings.hotkeys)
+    json.dump_file(ROF_HOTKEYS_PATH, rof_hk_settings)
+end
+-- its sub tabs in the Gameplay Enhancements window
+_G.RealisticRateOfFire.subs = { { "general", "General" }, { "weapons", "Weapons" }, { "overlay", "Overlay" },
+    { "controls", "Controls" }, { "advanced", "Advanced" } }
 
 local fire_mode_display_timer = 0
 local fire_mode_display_duration = 2.0
