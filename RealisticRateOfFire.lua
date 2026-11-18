@@ -23,7 +23,7 @@ local rof_settings_defaults = {
     overlay_use_rects = false,
     overlay_style = 3,
     overlay_always_show = true,
-    overlay_hk_color = 0x66FFFFFF,   -- the German style's color, 0xAABBGGRR (Default: the overlay's faint white)
+    overlay_hk_color = 0x667575BD,   -- the German style's color, 0xAABBGGRR (Default: red; user: "make the current red for the german thing the default")
     layer_recoil = true,             -- semi-auto and burst recoil blends like full-auto (RealisticRateOfFire.dll)
     debug_log = false,               -- our info lines in the REFramework log (and the DLL's shot probe): off in normal play
     active_profile = "",
@@ -905,12 +905,49 @@ end
 
 local toggle_was_down = false
 
+-- No fire-mode switch from a press that starts a melee move (user: "the mp5 fire mod selection should not trigger if we are
+-- melee ing i can hear it clicking since i have overalpping hotkeys"): the same keys can be another mod's kick or attack, and
+-- on the press's own update his action has not changed yet. So a press waits TOGGLE_WAIT updates and is dropped if by then
+-- he is in a melee move (or already was at the press).
+local TOGGLE_WAIT = 6
+local toggle_due = nil
+local MELEE_ACTIONS = { "^MeleeAttack", "^EnemyStunAction", "^Occupied", "^Grapple", "^Parry", "Kick" }
+local function in_melee()
+    local name = nil
+    pcall(function()
+        local updater = get_player():get_field("<CharacterUpdaterBase>k__BackingField")
+        local action = updater:call("getActionData(app.NameHash)",
+            updater:call("get_ActionBlackboardUnit"):call("get_ActionState"):call("get_Action"))
+        name = tostring(action:call("get_ActionName"))
+    end)
+    if not name then return false end
+    for _, pattern in ipairs(MELEE_ACTIONS) do
+        if name:find(pattern) then return true, name end
+    end
+    return false
+end
+
 if NATIVE.on then
 re.on_application_entry("UpdateBehavior", function()
     local km = (not rof_hk_settings.use_modifier or hk.check_hotkey("Fire Mode Modifier", true)) and hk.check_hotkey("Fire Mode Toggle", true)
     local pad = (not rof_hk_settings.use_pad_modifier or hk.check_hotkey("Pad Fire Mode Modifier", true)) and hk.check_hotkey("Pad Fire Mode Toggle", true)
     local is_down = km or pad
-    if is_down and not toggle_was_down then NATIVE.press() end      -- the DLL cycles the mode
+    if is_down and not toggle_was_down and not toggle_due then
+        toggle_due = TOGGLE_WAIT     -- (a press already in a melee move is dropped just below, on this same update)
+    end
+    if toggle_due then
+        local melee, name = in_melee()
+        if melee then
+            if rof_settings.debug_log then log.info("[RealisticRateOfFire] fire mode switch dropped: a melee move (" .. tostring(name) .. ")") end
+            toggle_due = nil
+        else
+            toggle_due = toggle_due - 1
+            if toggle_due <= 0 then
+                toggle_due = nil
+                NATIVE.press()      -- the DLL cycles the mode
+            end
+        end
+    end
     toggle_was_down = is_down or false
     NATIVE.take()
 end)
