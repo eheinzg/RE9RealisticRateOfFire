@@ -1073,7 +1073,7 @@ local function draw_menu(W)
         -- the mod"): off, the DLL does no game work and puts back the game's own values it changed
         local en_changed
         en_changed, rof_settings.enabled = W.check("Realistic Rate of Fire##rrof_enabled", rof_settings.enabled ~= false,
-            "Off: the game's own fire modes, rates, recoil, regrip and camera shake, as if the mod were not installed")
+            "Enable realistic rates of fire for each weapon")
         if en_changed then
             NATIVE.sync()
             save_settings()
@@ -1605,8 +1605,7 @@ local function draw_menu(W)
         -- On = the DLL's "not while shooting" (regrip_mode 2: held back from a shot until the trigger is up and the recoil is
         -- done), Off = 1 (user: "rename the regrip anmation option called on, but not while shooting. change it to just On and
         -- remove the old On option"; the old always-on mode 0 is read as On)
-        local regrip_changed, regrip_idx = W.combo("Regrip Animation", rof_settings.regrip_mode == 1 and 2 or 1, { "On", "Off" },
-            "On plays it between shots, after the recoil animation is done. Off keeps it from interrupting shots when using high ROF")
+        local regrip_changed, regrip_idx = W.combo("Regrip Animation", rof_settings.regrip_mode == 1 and 2 or 1, { "On", "Off" })
         if regrip_changed then
             rof_settings.regrip_mode = regrip_idx == 2 and 1 or 2
             rof_settings.disable_regrip = rof_settings.regrip_mode == 1
